@@ -5,15 +5,24 @@
 // See the Electron documentation for details on how to use preload scripts:
 // https://www.electronjs.org/docs/latest/tutorial/process-model#preload-scripts
 
-import { contextBridge } from 'electron';
+import { contextBridge, ipcRenderer } from "electron";
 
-// Expose protected methods that allow the renderer process to use
-// the APIs in a safe way. This is optional but recommended for security.
-contextBridge.exposeInMainWorld('electronAPI', {
-  // Add any APIs you want to expose to the renderer process here
-  // Example:
-  // platform: process.platform,
-  // versions: process.versions,
+contextBridge.exposeInMainWorld("electronAPI", {});
+
+contextBridge.exposeInMainWorld("zenhospUpdater", {
+  getVersion: () => ipcRenderer.invoke("updater:get-version"),
+  checkForUpdates: () => ipcRenderer.invoke("updater:check"),
+  downloadUpdate: () => ipcRenderer.invoke("updater:download"),
+  quitAndInstall: () => ipcRenderer.invoke("updater:quit-and-install"),
+  onUpdaterEvent: (handler: (payload: { type: string; data?: unknown }) => void) => {
+    const listener = (_event: unknown, payload: { type: string; data?: unknown }) => {
+      handler(payload);
+    };
+    ipcRenderer.on("updater:event", listener);
+    return () => {
+      ipcRenderer.removeListener("updater:event", listener);
+    };
+  },
 });
 
 // Log that preload script has loaded (only in development)

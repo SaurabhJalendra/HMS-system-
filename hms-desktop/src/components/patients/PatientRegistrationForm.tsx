@@ -6,6 +6,7 @@ import type { Patient } from '../../lib/api/types';
 import type { CreatePatientRequest } from '../../lib/api/types';
 import { Gender } from '../../lib/api/types';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
 
 export type PatientRegistrationFormData = {
   name: string;
@@ -54,6 +55,7 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
   onSuccess,
   submitLabel = 'Register patient → Continue to Step 2',
 }) => {
+  useCriticalUpdateLock(true, 'patient-registration');
   const [formData, setFormData] = useState<PatientRegistrationFormData>(getInitialPatientRegistrationFormData);
   const [allergyCatalog, setAllergyCatalog] = useState<Allergy[]>([]);
   const [conditionCatalog, setConditionCatalog] = useState<ChronicCondition[]>([]);

@@ -4,6 +4,7 @@ import catalogService from '../../../lib/api/services/catalogService';
 import type { Appointment } from '../../../lib/api/types';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import MedicineSearchSelect from './MedicineSearchSelect';
+import { useCriticalUpdateLock } from '../../../lib/hooks/useCriticalUpdateLock';
 
 interface PrescriptionLine {
   medicineId: string;
@@ -30,6 +31,7 @@ const PrescriptionWriter: React.FC<PrescriptionWriterProps> = ({
   onDone,
   onBack,
 }) => {
+  useCriticalUpdateLock(true, 'prescription');
   const [medicines, setMedicines] = useState<
     Array<{ id: string; name: string; code?: string; genericName?: string }>
   >([]);

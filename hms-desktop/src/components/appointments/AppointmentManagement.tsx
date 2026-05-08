@@ -2,12 +2,17 @@ import React, { useState, useEffect } from 'react';
 import appointmentService from '../../lib/api/services/appointmentService';
 import patientService from '../../lib/api/services/patientService';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
+
 const AppointmentManagement = ({ user, isAuthenticated, onNavigate }) => {
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [editingAppointment, setEditingAppointment] = useState(null);
+
+  useCriticalUpdateLock(Boolean(editingAppointment), 'appointment-edit');
+
   const [doctors, setDoctors] = useState([]);
   const [patients, setPatients] = useState([]);
   const [searchFilters, setSearchFilters] = useState({

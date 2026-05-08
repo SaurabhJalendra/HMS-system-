@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
 import consultationService from '../../lib/api/services/consultationService';
 import appointmentService from '../../lib/api/services/appointmentService';
 import patientService from '../../lib/api/services/patientService';
@@ -14,6 +15,11 @@ const ConsultationManagement = ({ onBack, user, appointmentData }) => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingConsultation, setEditingConsultation] = useState(null);
+
+  useCriticalUpdateLock(
+    Boolean(showAddForm || showEditForm),
+    'consultation-management'
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDoctor, setFilterDoctor] = useState('');
   const [filterPatient, setFilterPatient] = useState('');

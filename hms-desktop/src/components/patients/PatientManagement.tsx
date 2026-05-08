@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
 import patientService from '../../lib/api/services/patientService';
 import catalogService from '../../lib/api/services/catalogService';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -13,6 +14,11 @@ const PatientManagement = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
+
+  useCriticalUpdateLock(
+    Boolean(showEditModal || showDeleteConfirm),
+    'patient-management'
+  );
   const [patientHistory, setPatientHistory] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');

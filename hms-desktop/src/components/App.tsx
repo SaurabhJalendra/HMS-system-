@@ -4,6 +4,7 @@ import authService from '../lib/api/services/authService';
 import configService from '../lib/api/services/configService';
 import { hasModuleAccess } from '../lib/utils/rolePermissions';
 import { HospitalConfigProvider } from '../lib/contexts/HospitalConfigContext';
+import { UpdateSessionProvider } from '../lib/contexts/UpdateSessionContext';
 import LoginForm from './auth/LoginForm';
 import RoleBasedDashboard from './dashboard/RoleBasedDashboard';
 import PatientManagement from './patients/PatientManagement';
@@ -594,13 +595,17 @@ const App: React.FC = () => {
   // Render main application if authenticated
   if (setupState === 'ready' && isAuthenticated) {
     return React.createElement(
-      'div',
-      { style: { minHeight: '100vh', backgroundColor: '#F0F0F0', display: 'flex', flexDirection: 'column' } },
-      renderNavigation(),
+      UpdateSessionProvider,
+      null,
       React.createElement(
         'div',
-        { style: { flex: 1, padding: '0' } },
-        renderCurrentModule()
+        { style: { minHeight: '100vh', backgroundColor: '#F0F0F0', display: 'flex', flexDirection: 'column' } },
+        renderNavigation(),
+        React.createElement(
+          'div',
+          { style: { flex: 1, padding: '0' } },
+          renderCurrentModule()
+        )
       )
     );
   }

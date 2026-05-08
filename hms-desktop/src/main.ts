@@ -1,6 +1,9 @@
 import { app, BrowserWindow, Menu, globalShortcut } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
+import { registerUpdaterIpcOnce, setUpdaterTargetWindow } from "./main/updater";
+
+registerUpdaterIpcOnce();
 
 // Simple logger for Electron main process (immediate console output)
 const desktopLogger = {
@@ -192,6 +195,7 @@ const createWindow = () => {
   // Log window events
   mainWindow.on('closed', () => {
     desktopLogger.info('Main window closed');
+    setUpdaterTargetWindow(null);
     mainWindow = null;
   });
 
@@ -269,6 +273,8 @@ const createWindow = () => {
     mainWindow.loadFile(htmlPath);
   }
   desktopLogger.info('DevTools disabled by default. Press F12 or Ctrl+Shift+I to open.');
+
+  setUpdaterTargetWindow(mainWindow);
 };
 
 // Register global keyboard shortcuts (works even when window doesn't have focus)
