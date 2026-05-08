@@ -4,6 +4,7 @@ import labTestService from '../../../lib/api/services/labTestService';
 import type { Appointment } from '../../../lib/api/types';
 import type { TestCatalog } from '../../../lib/api/types';
 import LoadingSpinner from '../../common/LoadingSpinner';
+import { useCriticalUpdateLock } from '../../../lib/hooks/useCriticalUpdateLock';
 
 interface ConsultationFormProps {
   appointment: Appointment;
@@ -39,6 +40,7 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
   onBack,
   onHoldComplete,
 }) => {
+  useCriticalUpdateLock(true, 'consultation');
   const [diagnosis, setDiagnosis] = useState('');
   const [notes, setNotes] = useState('');
   const [holdUntil, setHoldUntil] = useState(defaultHoldDatetimeLocal);
