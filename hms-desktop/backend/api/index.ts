@@ -72,6 +72,17 @@ app.use('/api/uploads', express.static('uploads'));
 // Request logging middleware (must be after body parsing)
 app.use(requestLogger);
 
+// Root URL: browsers/scanners often hit GET / — respond clearly instead of 404
+app.get('/', (_req, res) => {
+  res.status(200).json({
+    success: true,
+    service: 'ZenHosp HMS API',
+    message: 'API is running. Use /health for probes and /api for REST endpoints.',
+    health: '/health',
+    api: '/api',
+  });
+});
+
 // Health check endpoint (MUST be defined before routes so it's always available)
 app.get('/health', (req, res) => {
   res.status(200).json({
