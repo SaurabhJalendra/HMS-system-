@@ -1,5 +1,6 @@
 import { ipcMain, app, BrowserWindow } from "electron";
 import { autoUpdater } from "electron-updater";
+import bundledUpdateConfig from "./update-config.json";
 
 let targetWindow: BrowserWindow | null = null;
 let listenersBound = false;
@@ -15,12 +16,20 @@ function sendToRenderer(payload: { type: string; data?: unknown }) {
   }
 }
 
+function resolveFeedUrl(): string | null {
+  const fromEnv = process.env.ZENHOSP_UPDATE_FEED_URL?.trim();
+  if (fromEnv) return fromEnv;
+  const fromBundle = bundledUpdateConfig?.feedUrl?.trim();
+  if (fromBundle) return fromBundle;
+  return null;
+}
+
 function configureFeedIfNeeded(): boolean {
-  const url = process.env.ZENHOSP_UPDATE_FEED_URL?.trim();
+  const url = resolveFeedUrl();
   if (url) {
     if (!feedConfigured) {
       autoUpdater.setFeedURL({
-        provider: "generic",
+        provider: bundledUpdateConfig?.provider === "github" ? "github" : "generic",
         url: url.endsWith("/") ? url : `${url}/`,
       });
       feedConfigured = true;

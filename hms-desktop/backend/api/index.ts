@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import logger, { loggerWithContext } from './utils/logger';
 import { requestLogger } from './middleware/requestLogger';
@@ -9,8 +10,11 @@ import { errorHandler } from './middleware/errorHandler';
 import { generalLimiter, strictLimiter } from './middleware/rateLimiter';
 import { sanitizeInput } from './middleware/inputSanitizer';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from backend/.env (explicit path — cwd varies under concurrently/nodemon)
+dotenv.config({
+  path: path.join(__dirname, '../.env'),
+  override: true,
+});
 
 // Initialize Express app
 const app = express();
@@ -116,6 +120,7 @@ const routes = [
     { path: '/api/ot-rooms', module: './routes/otRooms', exportName: 'otRoomRoutes' },
     { path: '/api/surgeries', module: './routes/surgeries', exportName: 'surgeryRoutes' },
     { path: '/api/procedure-catalog', module: './routes/procedureCatalog', exportName: 'procedureCatalogRoutes' },
+    { path: '/api/version', module: './routes/version', exportName: null },
     { path: '/api/config', module: './routes/config', exportName: null },
     { path: '/api/catalog', module: './routes/catalog', exportName: null },
     { path: '/api/currency', module: './routes/currency', exportName: null },

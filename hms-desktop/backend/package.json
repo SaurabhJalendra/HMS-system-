@@ -7,7 +7,7 @@
     "test": "tests"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('api/data','dist/data',{recursive:true})\"",
     "start": "node dist/index.js",
     "dev": "nodemon --exec ts-node api/index.ts",
     "test": "jest",

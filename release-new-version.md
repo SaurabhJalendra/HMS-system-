@@ -1,6 +1,6 @@
-# Release New GCS Version
+# Release New ZenHosp Version
 
-## 1. Finish Development
+## 1. Finish development
 
 1. Merge tested changes into `main`.
 2. Confirm the working tree is clean.
@@ -9,87 +9,94 @@
 git status
 ```
 
-## 2. Update App Version
+## 2. Update app version
 
-Update the desktop app version:
+Edit:
 
 ```text
-apps/desktop/package.json
+hms-desktop/package.json
 ```
 
 Example:
 
 ```json
-"version": "0.0.2"
+"version": "2.3.0"
 ```
 
-## 3. Commit Version Change
+## 3. Sync release manifest
 
 ```powershell
-git add apps/desktop/package.json
-git commit -m "Release v0.0.2"
+cd hms-desktop
+node scripts/sync-release-version.mjs --notes "Faster login" "OT module" "Billing fixes"
+```
+
+Edit `release/version.json` if you need to raise `minimumDesktopVersion` for breaking API changes.
+
+## 4. Commit version change
+
+```powershell
+git add hms-desktop/package.json hms-desktop/release/version.json hms-desktop/backend/api/data/release-version.json hms-desktop/backend/package.json
+git commit -m "Release v2.3.0"
 git push origin main
 ```
 
-## 4. Create Matching Tag
+## 5. Create matching tag
 
 Tag must match the desktop app version.
 
 ```powershell
-git tag v0.0.2
-git push origin v0.0.2
+git tag v2.3.0
+git push origin v2.3.0
 ```
 
-## 5. Build Installer
+Tag push triggers the **desktop-release** GitHub Action. Backend deploy runs on `main` push.
+
+## 6. Build installer (local alternative)
 
 ```powershell
-npm run build:installer
+cd hms-desktop
+$env:ZENHOSP_UPDATE_FEED_URL = "https://YOUR-S3-OR-CLOUDFRONT-URL/zenhosp/desktop/"
+npm run release:build
 ```
 
 Expected files:
 
 ```text
-dist/installer-artifacts/GCS-Setup.exe
-dist/installer-artifacts/GCS-Setup.exe.blockmap
-dist/installer-artifacts/latest.yml
+release/installer-artifacts/RELEASES
+release/installer-artifacts/ZenHosp-Setup.exe
+release/installer-artifacts/*.nupkg
 ```
 
-## 6. Publish GitHub Release
+## 7. Publish to S3
 
 ```powershell
-gh release create v0.0.2 `
-  dist/installer-artifacts/GCS-Setup.exe `
-  dist/installer-artifacts/GCS-Setup.exe.blockmap `
-  dist/installer-artifacts/latest.yml `
-  --repo Shubhendra-Yadav/gcs-updates `
-  --title "GCS v0.0.2" `
-  --notes "GCS desktop release v0.0.2"
+$env:ZENHOSP_UPDATE_S3_BUCKET = "your-bucket"
+$env:AWS_REGION = "ap-south-1"
+npm run release:publish-s3
 ```
 
-Do not upload:
+Or use GitHub Actions with secrets configured (see `docs/RELEASE_AND_UPDATES.md`).
 
-```text
-builder-debug.yml
+## 8. Deploy backend (EC2)
+
+Automatic via GitHub Actions, or manually:
+
+```bash
+cd hms-desktop/backend
+git pull
+npm ci
+npx prisma migrate deploy
+npm run build
+pm2 reload ecosystem.config.cjs
+curl http://127.0.0.1:3000/api/version
 ```
 
-## 7. Verify Release
+## 9. Test update
 
-```powershell
-gh release view v0.0.2 --repo Shubhendra-Yadav/gcs-updates
-```
-
-Confirm release assets:
-
-```text
-GCS-Setup.exe
-GCS-Setup.exe.blockmap
-latest.yml
-```
-
-## 8. Test Update
-
-1. Open the previously installed GCS app.
-2. Go to Settings.
+1. Open a previously installed ZenHosp app.
+2. Go to **Configuration → Updates**.
 3. Check for updates.
 4. Download update.
-5. Restart and install only when the drone is disarmed and no mission is running.
+5. Restart and install only when no patient registration, consultation, or prescription is in progress.
+
+Full architecture: `hms-desktop/docs/RELEASE_AND_UPDATES.md`
