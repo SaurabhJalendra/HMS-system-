@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "backendVersion": "1.0.0",
+  "minimumDesktopVersion": "1.0.0",
+  "latestDesktopVersion": "1.0.0",
+  "releaseNotes": [
+    "Initial ZenHosp release"
+  ],
+  "publishedAt": null
+}

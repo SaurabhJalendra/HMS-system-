@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { getZenHospUpdater, isZenHospUpdaterAvailable } from "../../lib/updater/zenhospUpdaterClient";
 import { useUpdateSession } from "../../lib/contexts/UpdateSessionContext";
+import {
+  fetchVersionInfo,
+  evaluateVersionCompatibility,
+  type VersionInfo,
+} from "../../lib/api/services/versionService";
 
 type UiPhase =
   | "idle"
@@ -20,16 +25,32 @@ const AppUpdatePanel: React.FC = () => {
   const [remoteVersion, setRemoteVersion] = useState<string>("");
   const [message, setMessage] = useState<string>("");
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
+  const [releaseNotes, setReleaseNotes] = useState<string[]>([]);
+  const [backendInfo, setBackendInfo] = useState<VersionInfo | null>(null);
+  const [backendCompat, setBackendCompat] = useState<string>("");
 
   const updater = getZenHospUpdater();
 
   useEffect(() => {
     if (!updater) return;
     let off: (() => void) | undefined;
+
     void updater.getVersion().then((v) => {
       setInstalledVersion(v.version);
       setIsPackaged(v.isPackaged);
     });
+
+    void fetchVersionInfo()
+      .then((info) => {
+        setBackendInfo(info);
+        if (installedVersion) {
+          setBackendCompat(evaluateVersionCompatibility(installedVersion, info));
+        }
+      })
+      .catch(() => {
+        /* backend offline — panel still works for electron-updater */
+      });
+
     off = updater.onUpdaterEvent((evt) => {
       switch (evt.type) {
         case "checking-for-update":
@@ -37,17 +58,24 @@ const AppUpdatePanel: React.FC = () => {
           setMessage("");
           setDownloadPercent(null);
           break;
-        case "update-available":
+        case "update-available": {
           setPhase("available");
-          setRemoteVersion(
-            (evt.data as { version?: string })?.version || "newer"
-          );
+          const info = evt.data as {
+            version?: string;
+            releaseNotes?: string | string[];
+          };
+          setRemoteVersion(info?.version || "newer");
+          const notes = info?.releaseNotes;
+          if (Array.isArray(notes)) setReleaseNotes(notes.map(String));
+          else if (typeof notes === "string" && notes.trim()) setReleaseNotes([notes]);
           setMessage("A newer version is available.");
           break;
+        }
         case "update-not-available":
           setPhase("no-update");
-          setMessage("You are on the latest version.");
+          setMessage("You are on the latest version from the update server.");
           setRemoteVersion("");
+          setReleaseNotes([]);
           break;
         case "download-progress":
           setPhase("downloading");
@@ -55,14 +83,20 @@ const AppUpdatePanel: React.FC = () => {
             Math.round((evt.data as { percent?: number })?.percent ?? 0)
           );
           break;
-        case "update-downloaded":
+        case "update-downloaded": {
           setPhase("ready");
           setDownloadPercent(100);
-          setRemoteVersion(
-            (evt.data as { version?: string })?.version || ""
-          );
+          const info = evt.data as {
+            version?: string;
+            releaseNotes?: string | string[];
+          };
+          setRemoteVersion(info?.version || "");
+          const notes = info?.releaseNotes;
+          if (Array.isArray(notes)) setReleaseNotes(notes.map(String));
+          else if (typeof notes === "string" && notes.trim()) setReleaseNotes([notes]);
           setMessage("Update downloaded. Restart when you are finished with patient work.");
           break;
+        }
         case "error":
           setPhase("error");
           setMessage(
@@ -83,7 +117,13 @@ const AppUpdatePanel: React.FC = () => {
     return () => {
       off?.();
     };
-  }, [updater]);
+  }, [updater, installedVersion]);
+
+  useEffect(() => {
+    if (installedVersion && backendInfo) {
+      setBackendCompat(evaluateVersionCompatibility(installedVersion, backendInfo));
+    }
+  }, [installedVersion, backendInfo]);
 
   const handleCheck = useCallback(async () => {
     if (!updater) {
@@ -140,20 +180,68 @@ const AppUpdatePanel: React.FC = () => {
         consultation, or prescription is in progress.
       </p>
 
-      <div className="text-sm text-gray-800 mb-4 space-y-1">
-        <div>
-          <span className="font-medium">Installed version:</span>{" "}
-          {installedVersion || "—"}
-          {!isPackaged && (
-            <span className="ml-2 text-amber-700">(development / unpackaged)</span>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-800 mb-4">
+        <div className="rounded border border-gray-200 p-3 bg-gray-50">
+          <div className="font-medium text-gray-900 mb-2">Desktop</div>
+          <div>
+            <span className="text-gray-600">Current:</span>{" "}
+            {installedVersion || "—"}
+            {!isPackaged && (
+              <span className="ml-2 text-amber-700 text-xs">(dev / unpackaged)</span>
+            )}
+          </div>
+          {remoteVersion ? (
+            <div>
+              <span className="text-gray-600">Update server:</span> v{remoteVersion}
+            </div>
+          ) : backendInfo?.latestDesktopVersion ? (
+            <div>
+              <span className="text-gray-600">Latest (API):</span> v
+              {backendInfo.latestDesktopVersion}
+            </div>
+          ) : null}
+        </div>
+        <div className="rounded border border-gray-200 p-3 bg-gray-50">
+          <div className="font-medium text-gray-900 mb-2">Backend API</div>
+          {backendInfo ? (
+            <>
+              <div>
+                <span className="text-gray-600">Version:</span> v
+                {backendInfo.backendVersion}
+              </div>
+              <div>
+                <span className="text-gray-600">Min desktop:</span> v
+                {backendInfo.minimumDesktopVersion}
+              </div>
+              {backendCompat && backendCompat !== "compatible" ? (
+                <div className="mt-1 text-amber-800 text-xs font-medium">
+                  {backendCompat === "update_required"
+                    ? "Your desktop is below the minimum required for this backend."
+                    : "A newer desktop release is recommended for this backend."}
+                </div>
+              ) : backendCompat === "compatible" ? (
+                <div className="mt-1 text-green-700 text-xs">Compatible with this backend.</div>
+              ) : null}
+            </>
+          ) : (
+            <div className="text-gray-500 text-xs">Could not reach /api/version</div>
           )}
         </div>
-        {remoteVersion ? (
-          <div>
-            <span className="font-medium">Update version:</span> {remoteVersion}
-          </div>
-        ) : null}
       </div>
+
+      {(releaseNotes.length > 0 ||
+        (backendInfo?.releaseNotes?.length && phase !== "no-update")) ? (
+        <div className="mb-4 rounded border border-gray-200 p-3 bg-white">
+          <div className="text-sm font-medium text-gray-900 mb-2">What&apos;s new</div>
+          <ul className="text-sm text-gray-700 list-disc list-inside space-y-0.5">
+            {(releaseNotes.length > 0 ? releaseNotes : backendInfo?.releaseNotes || [])
+              .slice(0, 8)
+              .map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+          </ul>
+        </div>
+      ) : null}
 
       {message ? (
         <div
@@ -222,8 +310,11 @@ const AppUpdatePanel: React.FC = () => {
       </div>
 
       <p className="mt-4 text-xs text-gray-500">
-        Packaged installs need <code className="bg-gray-100 px-1 rounded">ZENHOSP_UPDATE_FEED_URL</code> set on the machine (or in the installer environment) to the HTTPS base URL that contains your Squirrel{" "}
-        <code className="bg-gray-100 px-1 rounded">RELEASES</code> file and packages. Dev runs skip real checks unless{" "}
+        Packaged installs check{" "}
+        <code className="bg-gray-100 px-1 rounded">ZENHOSP_UPDATE_FEED_URL</code> or the feed URL
+        baked in at build time (S3 / CloudFront folder with Squirrel{" "}
+        <code className="bg-gray-100 px-1 rounded">RELEASES</code> + packages). Dev runs skip real
+        checks unless{" "}
         <code className="bg-gray-100 px-1 rounded">ZENHOSP_UPDATER_TEST_DEV=1</code>.
       </p>
     </div>

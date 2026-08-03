@@ -5,6 +5,7 @@ import configService from '../lib/api/services/configService';
 import { hasModuleAccess } from '../lib/utils/rolePermissions';
 import { HospitalConfigProvider } from '../lib/contexts/HospitalConfigContext';
 import { UpdateSessionProvider } from '../lib/contexts/UpdateSessionContext';
+import VersionCompatibilityBanner from './config/VersionCompatibilityBanner';
 import LoginForm from './auth/LoginForm';
 import RoleBasedDashboard from './dashboard/RoleBasedDashboard';
 import PatientManagement from './patients/PatientManagement';
@@ -145,8 +146,8 @@ const App: React.FC = () => {
           code: error.code,
         });
         
-        // Only show offline message if we've tried a few times (to avoid flashing during restarts)
-        if (newRetryCount >= 2) {
+        // Show offline UI on first failed attempt (setupState null otherwise leaves spinner forever)
+        if (newRetryCount >= 1) {
           setSetupState('backendOffline');
         }
         setIsLoading(false);
@@ -601,6 +602,9 @@ const App: React.FC = () => {
         'div',
         { style: { minHeight: '100vh', backgroundColor: '#F0F0F0', display: 'flex', flexDirection: 'column' } },
         renderNavigation(),
+        React.createElement(VersionCompatibilityBanner, {
+          onNavigateToSettings: () => setCurrentModule('configuration'),
+        }),
         React.createElement(
           'div',
           { style: { flex: 1, padding: '0' } },
