@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { getHospitalId } from './hospitalHelper';
+import logger, { logAction } from './logger';
 
 const prisma = new PrismaClient();
 
@@ -20,7 +21,7 @@ export const createAuditLog = async (data: AuditLogData) => {
   try {
     const hospitalId = await getHospitalId();
     if (!hospitalId) {
-      console.warn('Cannot create audit log: Hospital ID not found');
+      logger.warn('Cannot create audit log: Hospital ID not found', { context: 'Audit' });
       return;
     }
 
@@ -35,8 +36,19 @@ export const createAuditLog = async (data: AuditLogData) => {
         newValue: data.details,
       },
     });
+
+    logAction(`Audit: ${data.action} on ${data.entityType}`, {
+      userId: data.userId,
+      action: data.action,
+      tableName: data.entityType,
+      recordId: data.entityId,
+    });
   } catch (error) {
-    console.error('Failed to create audit log:', error);
+    logger.error('Failed to create audit log', error instanceof Error ? error : undefined, {
+      context: 'Audit',
+      action: data.action,
+      entityType: data.entityType,
+    });
     // Don't throw error to avoid breaking the main operation
   }
 };
@@ -56,7 +68,7 @@ export const logAudit = async (params: {
   try {
     const hospitalId = await getHospitalId();
     if (!hospitalId) {
-      console.warn('Cannot create audit log: Hospital ID not found');
+      logger.warn('Cannot create audit log: Hospital ID not found', { context: 'Audit' });
       return;
     }
 
@@ -71,8 +83,19 @@ export const logAudit = async (params: {
         newValue: params.newValue ? JSON.parse(JSON.stringify(params.newValue)) : null,
       },
     });
+
+    logAction(`Audit: ${params.action} on ${params.tableName}`, {
+      userId: params.userId,
+      action: params.action,
+      tableName: params.tableName,
+      recordId: params.recordId,
+    });
   } catch (error) {
-    console.error('Failed to create audit log:', error);
+    logger.error('Failed to create audit log', error instanceof Error ? error : undefined, {
+      context: 'Audit',
+      action: params.action,
+      tableName: params.tableName,
+    });
     // Don't throw error to avoid breaking the main operation
   }
 };

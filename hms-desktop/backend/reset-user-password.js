@@ -4,7 +4,7 @@
  *   node reset-user-password.js --list
  *   node reset-user-password.js <username> <newPassword>
  */
-const { PrismaClient, UserRole } = require('@prisma/client');
+const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();

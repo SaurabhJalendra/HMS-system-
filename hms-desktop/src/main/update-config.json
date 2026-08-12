@@ -1,5 +1,6 @@
 {
-  "feedUrl": null,
-  "version": "1.0.0",
-  "provider": "generic"
+  "provider": "github",
+  "owner": "SaurabhJalendra",
+  "repo": "HMS-system-",
+  "version": "1.0.0"
 }

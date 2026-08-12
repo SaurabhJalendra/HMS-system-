@@ -1,5 +1,5 @@
 import type { ForgeConfig } from "@electron-forge/shared-types";
-import { MakerSquirrel } from "@electron-forge/maker-squirrel";
+import MakerNSIS from "@electron-addons/electron-forge-maker-nsis";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { MakerDeb } from "@electron-forge/maker-deb";
 import { MakerRpm } from "@electron-forge/maker-rpm";
@@ -14,10 +14,15 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({
-      name: "ZenHosp",
-      setupExe: "ZenHosp-Setup.exe",
-      setupIcon: undefined,
+    // Windows: NSIS + latest.yml for electron-updater (replaces MakerSquirrel).
+    // updater.url is required by the maker to emit channel yml; runtime GitHub
+    // provider config is handled separately in src/main/updater.ts (Step 6).
+    new MakerNSIS({
+      updater: {
+        url: "https://github.com/SaurabhJalendra/HMS-system-/releases/latest/download",
+        channel: "latest",
+        updaterCacheDirName: "zenhosp-updater",
+      },
     }),
     new MakerZIP({}, ["darwin"]),
     new MakerRpm({}),

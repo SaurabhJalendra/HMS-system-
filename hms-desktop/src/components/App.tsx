@@ -239,7 +239,7 @@ const App: React.FC = () => {
       setIsLoading(true);
       const response = await authService.login(credentials);
       
-      if (response.user && response.accessToken) {
+      if (response?.user && response?.accessToken) {
         localStorage.setItem('accessToken', response.accessToken);
         setUser(response.user);
         setIsAuthenticated(true);
@@ -249,7 +249,8 @@ const App: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Login failed:', error);
-      const errorMessage = error.response?.data?.message || 'Login failed. Please try again.';
+      const errorMessage =
+        error.response?.data?.message || error.message || 'Login failed. Please try again.';
       return { success: false, message: errorMessage };
     } finally {
       setIsLoading(false);
