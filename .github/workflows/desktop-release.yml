@@ -1,5 +1,9 @@
 # Build ZenHosp Windows installer and publish update artifacts.
 # Triggers on version tags (v*) or manual dispatch.
+#
+# Required Actions secret for a clinic-ready installer:
+#   VITE_API_URL = http://<ec2-host>:3000/api
+# Without it, Vite bakes http://localhost:3000/api into the .exe.
 
 name: Desktop Release
 
@@ -64,6 +68,8 @@ jobs:
 
       - name: Build Windows installer
         working-directory: hms-desktop
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: npm run make
 
       - name: Collect installer artifacts
