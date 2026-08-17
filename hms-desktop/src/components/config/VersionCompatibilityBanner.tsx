@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import {
   fetchVersionInfo,
+  fetchGitHubLatestDesktopVersion,
   evaluateVersionCompatibility,
+  pickNewerVersion,
   type VersionInfo,
 } from "../../lib/api/services/versionService";
 import { getZenHospUpdater, isZenHospUpdaterAvailable } from "../../lib/updater/zenhospUpdaterClient";
@@ -24,10 +26,18 @@ const VersionCompatibilityBanner: React.FC<Props> = ({ onNavigateToSettings }) =
     async function load() {
       try {
         let installed = config.APP_VERSION;
+        let githubLatest: string | null = null;
         const updater = getZenHospUpdater();
         if (updater) {
           const v = await updater.getVersion();
           if (v.version) installed = v.version;
+          if (v.githubOwner && v.githubRepo) {
+            const gh = await fetchGitHubLatestDesktopVersion(
+              v.githubOwner,
+              v.githubRepo
+            );
+            githubLatest = gh?.version || null;
+          }
         }
         if (cancelled) return;
         setDesktopVersion(installed);
@@ -35,8 +45,12 @@ const VersionCompatibilityBanner: React.FC<Props> = ({ onNavigateToSettings }) =
         const info = await fetchVersionInfo();
         if (cancelled) return;
 
-        setServerInfo(info);
-        setCompat(evaluateVersionCompatibility(installed, info));
+        const latest = pickNewerVersion(info.latestDesktopVersion, githubLatest);
+        setServerInfo({
+          ...info,
+          latestDesktopVersion: latest || info.latestDesktopVersion,
+        });
+        setCompat(evaluateVersionCompatibility(installed, info, githubLatest));
       } catch {
         if (cancelled) return;
         setCompat("error");

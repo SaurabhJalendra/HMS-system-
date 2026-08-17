@@ -1,5 +1,6 @@
+import path from "node:path";
 import type { ForgeConfig } from "@electron-forge/shared-types";
-import { MakerSquirrel } from "@electron-forge/maker-squirrel";
+import MakerNSIS from "@electron-addons/electron-forge-maker-nsis";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { MakerDeb } from "@electron-forge/maker-deb";
 import { MakerRpm } from "@electron-forge/maker-rpm";
@@ -7,17 +8,26 @@ import { VitePlugin } from "@electron-forge/plugin-vite";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
+const iconPath = path.resolve(__dirname, "assets", "icon");
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     appBundleId: "com.zenhosp.desktop",
+    icon: iconPath,
+    extraResource: [path.resolve(__dirname, "assets", "icon.ico")],
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({
-      name: "ZenHosp",
-      setupExe: "ZenHosp-Setup.exe",
-      setupIcon: undefined,
+    // Windows: NSIS + latest.yml for electron-updater (replaces MakerSquirrel).
+    // updater.url is required by the maker to emit channel yml; runtime GitHub
+    // provider config is handled separately in src/main/updater.ts (Step 6).
+    new MakerNSIS({
+      updater: {
+        url: "https://github.com/SaurabhJalendra/HMS-system-/releases/latest/download",
+        channel: "latest",
+        updaterCacheDirName: "zenhosp-updater",
+      },
     }),
     new MakerZIP({}, ["darwin"]),
     new MakerRpm({}),

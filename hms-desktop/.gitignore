@@ -90,6 +90,11 @@ typings/
 
 # Electron-Forge
 out/
+
+# Desktop installer / update feed artifacts (publish via GitHub Releases, not git)
+release/installer-artifacts/*
+!release/installer-artifacts/.gitkeep
+
 .cursor/
 .dev-os/
 README_Agents.md

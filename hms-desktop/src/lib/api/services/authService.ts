@@ -13,6 +13,14 @@ class AuthService {
       '/auth/login',
       credentials
     );
+
+    if (response.status !== 200 || !response.data.success || !response.data.data) {
+      const message = response.data?.message || 'Invalid credentials';
+      const error: any = new Error(message);
+      error.response = { status: response.status, data: response.data };
+      throw error;
+    }
+
     return response.data.data;
   }
 

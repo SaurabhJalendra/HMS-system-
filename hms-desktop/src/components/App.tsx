@@ -49,10 +49,38 @@ const App: React.FC = () => {
   const [setupState, setSetupState] = useState<SetupState>(null);
   const [backendRetryCount, setBackendRetryCount] = useState<number>(0);
   const [retryIntervalId, setRetryIntervalId] = useState<NodeJS.Timeout | null>(null);
+  const [hospitalLogoUrl, setHospitalLogoUrl] = useState<string>("");
+  const [hospitalDisplayName, setHospitalDisplayName] = useState<string>("");
 
   useEffect(() => {
     checkSetupState();
   }, []);
+
+  useEffect(() => {
+    if (setupState !== "ready") return;
+    let cancelled = false;
+    void configService
+      .getHospitalConfig()
+      .then((data) => {
+        if (cancelled) return;
+        const cfg = data.config;
+        const logo = (cfg?.logoUrl || "").trim();
+        setHospitalDisplayName(cfg?.hospitalName || "");
+        setHospitalLogoUrl(logo);
+        const api = (window as unknown as {
+          electronAPI?: { setAppIcon?: (dataUrl: string) => Promise<unknown> };
+        }).electronAPI;
+        if (logo.startsWith("data:image/") && api?.setAppIcon) {
+          void api.setAppIcon(logo);
+        }
+      })
+      .catch(() => {
+        /* branding is optional */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [setupState]);
 
   // When any API returns 401, clear auth state so login screen is shown
   useEffect(() => {
@@ -239,7 +267,7 @@ const App: React.FC = () => {
       setIsLoading(true);
       const response = await authService.login(credentials);
       
-      if (response.user && response.accessToken) {
+      if (response?.user && response?.accessToken) {
         localStorage.setItem('accessToken', response.accessToken);
         setUser(response.user);
         setIsAuthenticated(true);
@@ -249,7 +277,8 @@ const App: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Login failed:', error);
-      const errorMessage = error.response?.data?.message || 'Login failed. Please try again.';
+      const errorMessage =
+        error.response?.data?.message || error.message || 'Login failed. Please try again.';
       return { success: false, message: errorMessage };
     } finally {
       setIsLoading(false);
@@ -589,7 +618,12 @@ const App: React.FC = () => {
         className: 'min-h-screen bg-gray-100 flex items-center justify-center',
         style: { minHeight: '100vh', backgroundColor: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }
       },
-      React.createElement(LoginForm, { onLogin: handleLogin, isLoading })
+      React.createElement(LoginForm, {
+        onLogin: handleLogin,
+        isLoading,
+        logoUrl: hospitalLogoUrl,
+        hospitalName: hospitalDisplayName,
+      })
     );
   }
 

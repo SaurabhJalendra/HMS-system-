@@ -1,7 +1,16 @@
-import { app, BrowserWindow, Menu, globalShortcut } from "electron";
+import { app, BrowserWindow, Menu, globalShortcut, ipcMain, nativeImage } from "electron";
+import fs from "node:fs";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { registerUpdaterIpcOnce, setUpdaterTargetWindow } from "./main/updater";
+
+function resolveBundledAppIcon(): string | undefined {
+  const packagedIco = path.join(process.resourcesPath, "icon.ico");
+  const devIco = path.join(app.getAppPath(), "assets", "icon.ico");
+  if (app.isPackaged && fs.existsSync(packagedIco)) return packagedIco;
+  if (fs.existsSync(devIco)) return devIco;
+  return undefined;
+}
 
 registerUpdaterIpcOnce();
 
@@ -142,10 +151,12 @@ const createWindow = () => {
   desktopLogger.info('Creating main window...');
   
   // Create the browser window.
+  const bundledIcon = resolveBundledAppIcon();
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     title: 'ZenHosp - Hospital Management System', // Explicitly set window title
+    icon: bundledIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       // Content Security Policy settings
@@ -318,6 +329,27 @@ app.on("ready", () => {
   createMenu(); // Create application menu
   createWindow();
   registerGlobalShortcuts(); // Register global shortcuts after window is created
+
+  ipcMain.handle("app:set-icon", (_event, dataUrl: string) => {
+    if (!mainWindow || mainWindow.isDestroyed() || typeof dataUrl !== "string") {
+      return { ok: false };
+    }
+    if (!dataUrl.startsWith("data:image/")) {
+      return { ok: false };
+    }
+    try {
+      const image = nativeImage.createFromDataURL(dataUrl);
+      if (image.isEmpty()) return { ok: false };
+      mainWindow.setIcon(image);
+      if (process.platform === "darwin" && app.dock) {
+        app.dock.setIcon(image);
+      }
+      return { ok: true };
+    } catch (error) {
+      desktopLogger.warn("Failed to apply hospital logo as window icon", error);
+      return { ok: false };
+    }
+  });
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common

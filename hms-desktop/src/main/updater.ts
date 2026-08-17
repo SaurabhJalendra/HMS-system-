@@ -2,6 +2,16 @@ import { ipcMain, app, BrowserWindow } from "electron";
 import { autoUpdater } from "electron-updater";
 import bundledUpdateConfig from "./update-config.json";
 
+type BundledUpdateConfig = {
+  provider?: string;
+  owner?: string;
+  repo?: string;
+  feedUrl?: string | null;
+  version?: string;
+};
+
+const updateConfig = bundledUpdateConfig as BundledUpdateConfig;
+
 let targetWindow: BrowserWindow | null = null;
 let listenersBound = false;
 let feedConfigured = false;
@@ -16,27 +26,63 @@ function sendToRenderer(payload: { type: string; data?: unknown }) {
   }
 }
 
-function resolveFeedUrl(): string | null {
+function resolveGenericFeedUrl(): string | null {
   const fromEnv = process.env.ZENHOSP_UPDATE_FEED_URL?.trim();
   if (fromEnv) return fromEnv;
-  const fromBundle = bundledUpdateConfig?.feedUrl?.trim();
+  const fromBundle = updateConfig?.feedUrl?.trim();
   if (fromBundle) return fromBundle;
   return null;
 }
 
 function configureFeedIfNeeded(): boolean {
-  const url = resolveFeedUrl();
-  if (url) {
-    if (!feedConfigured) {
-      autoUpdater.setFeedURL({
-        provider: bundledUpdateConfig?.provider === "github" ? "github" : "generic",
-        url: url.endsWith("/") ? url : `${url}/`,
-      });
-      feedConfigured = true;
+  if (feedConfigured) return true;
+
+  const provider = (updateConfig?.provider || "github").toLowerCase();
+
+  if (provider === "github") {
+    const owner =
+      updateConfig?.owner?.trim() ||
+      process.env.ZENHOSP_GITHUB_OWNER?.trim() ||
+      "";
+    const repo =
+      updateConfig?.repo?.trim() ||
+      process.env.ZENHOSP_GITHUB_REPO?.trim() ||
+      "";
+
+    if (!owner || !repo) {
+      return false;
     }
+
+    autoUpdater.setFeedURL({
+      provider: "github",
+      owner,
+      repo,
+    });
+    feedConfigured = true;
     return true;
   }
+
+  if (provider === "generic") {
+    const url = resolveGenericFeedUrl();
+    if (!url) return false;
+
+    autoUpdater.setFeedURL({
+      provider: "generic",
+      url: url.endsWith("/") ? url : `${url}/`,
+    });
+    feedConfigured = true;
+    return true;
+  }
+
   return false;
+}
+
+function feedNotConfiguredMessage(): string {
+  const provider = (updateConfig?.provider || "github").toLowerCase();
+  if (provider === "github") {
+    return "Update feed is not configured. Set provider/owner/repo in update-config.json (or ZENHOSP_GITHUB_OWNER / ZENHOSP_GITHUB_REPO).";
+  }
+  return "Update feed is not configured. Set ZENHOSP_UPDATE_FEED_URL for the generic provider.";
 }
 
 function bindAutoUpdaterListenersOnce() {
@@ -83,6 +129,8 @@ export function registerUpdaterIpcOnce(): void {
   ipcMain.handle("updater:get-version", () => ({
     version: app.getVersion(),
     isPackaged: app.isPackaged,
+    githubOwner: updateConfig?.owner || process.env.ZENHOSP_GITHUB_OWNER || "",
+    githubRepo: updateConfig?.repo || process.env.ZENHOSP_GITHUB_REPO || "",
   }));
 
   ipcMain.handle("updater:check", async () => {
@@ -101,8 +149,7 @@ export function registerUpdaterIpcOnce(): void {
     }
 
     if (!configureFeedIfNeeded()) {
-      const msg =
-        "Update feed is not configured. Set environment variable ZENHOSP_UPDATE_FEED_URL to the HTTPS base URL of your Squirrel RELEASES folder (see ZenHosp release docs).";
+      const msg = feedNotConfiguredMessage();
       sendToRenderer({ type: "error", data: { message: msg } });
       return { ok: false, error: msg };
     }
@@ -116,8 +163,13 @@ export function registerUpdaterIpcOnce(): void {
       };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      sendToRenderer({ type: "error", data: { message } });
-      return { ok: false, error: message };
+      const friendly =
+        /Cannot find latest\.yml/i.test(message) ||
+        (/latest\.yml/i.test(message) && /404/i.test(message))
+          ? "Update feed is incomplete: latest.yml is missing from the GitHub release. Upload latest.yml (with the Setup.exe) to the latest release, then try again."
+          : message;
+      sendToRenderer({ type: "error", data: { message: friendly } });
+      return { ok: false, error: friendly };
     }
   });
 
@@ -126,7 +178,7 @@ export function registerUpdaterIpcOnce(): void {
       return { ok: false, error: "Download skipped in development (unpackaged)." };
     }
     if (!configureFeedIfNeeded()) {
-      return { ok: false, error: "Update feed not configured (ZENHOSP_UPDATE_FEED_URL)." };
+      return { ok: false, error: feedNotConfiguredMessage() };
     }
     try {
       await autoUpdater.downloadUpdate();

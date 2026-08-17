@@ -16,18 +16,63 @@ export type VersionCompatibility =
 
 export function evaluateVersionCompatibility(
   desktopVersion: string,
-  info: VersionInfo
+  info: VersionInfo,
+  githubLatest?: string | null
 ): VersionCompatibility {
   if (compareDesktop(desktopVersion, info.minimumDesktopVersion) < 0) {
     return "update_required";
   }
-  if (compareDesktop(desktopVersion, info.latestDesktopVersion) < 0) {
+  const advertisedLatest = pickNewerVersion(
+    info.latestDesktopVersion,
+    githubLatest
+  );
+  if (advertisedLatest && compareDesktop(desktopVersion, advertisedLatest) < 0) {
     return "update_recommended";
   }
   return "compatible";
 }
 
-function compareDesktop(a: string, b: string): number {
+export function pickNewerVersion(
+  a?: string | null,
+  b?: string | null
+): string | null {
+  const left = (a || "").trim();
+  const right = (b || "").trim();
+  if (!left) return right || null;
+  if (!right) return left;
+  return compareDesktop(left, right) >= 0 ? left : right;
+}
+
+export function normalizeDesktopVersion(raw: string): string {
+  return raw.trim().replace(/^v/i, "").split("-")[0];
+}
+
+export async function fetchGitHubLatestDesktopVersion(
+  owner: string,
+  repo: string
+): Promise<{ version: string; name: string; notes: string[] } | null> {
+  if (!owner || !repo) return null;
+  const response = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/releases/latest`,
+    { headers: { Accept: "application/vnd.github+json" }, redirect: "follow" }
+  );
+  if (!response.ok) return null;
+  const body = (await response.json()) as {
+    tag_name?: string;
+    name?: string;
+    body?: string;
+  };
+  const version = normalizeDesktopVersion(body.tag_name || body.name || "");
+  if (!version) return null;
+  const notes = (body.body || "")
+    .split("\n")
+    .map((line) => line.replace(/^[-*]\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  return { version, name: body.name || `v${version}`, notes };
+}
+
+export function compareDesktop(a: string, b: string): number {
   const parse = (v: string) =>
     v
       .trim()

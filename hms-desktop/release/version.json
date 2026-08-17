@@ -2,9 +2,9 @@
   "version": "1.0.0",
   "backendVersion": "1.0.0",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.0",
+  "latestDesktopVersion": "1.0.1",
   "releaseNotes": [
-    "Initial ZenHosp release"
+    "ZenHosp v1.0.1 desktop installer and latest.yml on GitHub Releases"
   ],
-  "publishedAt": null
+  "publishedAt": "2026-08-12T05:02:19Z"
 }

@@ -7,7 +7,9 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 
-contextBridge.exposeInMainWorld("electronAPI", {});
+contextBridge.exposeInMainWorld("electronAPI", {
+  setAppIcon: (dataUrl: string) => ipcRenderer.invoke("app:set-icon", dataUrl),
+});
 
 contextBridge.exposeInMainWorld("zenhospUpdater", {
   getVersion: () => ipcRenderer.invoke("updater:get-version"),
