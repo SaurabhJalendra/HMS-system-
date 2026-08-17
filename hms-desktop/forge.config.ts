@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import MakerNSIS from "@electron-addons/electron-forge-maker-nsis";
 import { MakerZIP } from "@electron-forge/maker-zip";
@@ -7,10 +8,14 @@ import { VitePlugin } from "@electron-forge/plugin-vite";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
+const iconPath = path.resolve(__dirname, "assets", "icon");
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     appBundleId: "com.zenhosp.desktop",
+    icon: iconPath,
+    extraResource: [path.resolve(__dirname, "assets", "icon.ico")],
   },
   rebuildConfig: {},
   makers: [

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const LoginForm = ({ onLogin, isLoading }) => {
+const LoginForm = ({ onLogin, isLoading, logoUrl, hospitalName }) => {
   const [formData, setFormData] = useState({
     username: '',
     password: ''
@@ -37,10 +37,17 @@ const LoginForm = ({ onLogin, isLoading }) => {
     React.createElement(
       'div',
       { style: { textAlign: 'center' } },
+      logoUrl
+        ? React.createElement('img', {
+            src: logoUrl,
+            alt: hospitalName || 'Hospital logo',
+            style: { maxWidth: '180px', maxHeight: '72px', objectFit: 'contain', marginBottom: '12px' },
+          })
+        : null,
       React.createElement(
         'h2',
         { style: { fontSize: '18px', fontWeight: '600', color: '#000000', margin: 0, marginBottom: '8px' } },
-        '🏥 ZenHosp Desktop'
+        hospitalName || 'ZenHosp Desktop'
       ),
       React.createElement(
         'p',

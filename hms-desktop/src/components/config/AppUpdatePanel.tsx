@@ -3,7 +3,9 @@ import { getZenHospUpdater, isZenHospUpdaterAvailable } from "../../lib/updater/
 import { useUpdateSession } from "../../lib/contexts/UpdateSessionContext";
 import {
   fetchVersionInfo,
+  fetchGitHubLatestDesktopVersion,
   evaluateVersionCompatibility,
+  pickNewerVersion,
   type VersionInfo,
 } from "../../lib/api/services/versionService";
 
@@ -17,6 +19,28 @@ type UiPhase =
   | "error"
   | "dev-skipped";
 
+/** Shorten electron-updater / GitHub dump into an actionable line. */
+function formatUpdaterError(raw: string): string {
+  const text = (raw || "").trim();
+  if (!text) return "Update error";
+
+  if (/Cannot find latest\.yml/i.test(text) || /latest\.yml/i.test(text) && /404/i.test(text)) {
+    return (
+      "Update feed is incomplete: latest.yml is missing from the GitHub release. " +
+      "Publish artifacts with npm run release:publish-github -- --tag <version> " +
+      "(must include latest.yml, Setup.exe, and .blockmap)."
+    );
+  }
+
+  if (/404/i.test(text) && /github\.com/i.test(text)) {
+    return "Update check failed (GitHub 404). Confirm the release exists and includes latest.yml.";
+  }
+
+  // Keep UI readable — full stack stays in main-process logs
+  const firstLine = text.split(/\r?\n/)[0] || text;
+  return firstLine.length > 280 ? `${firstLine.slice(0, 277)}…` : firstLine;
+}
+
 const AppUpdatePanel: React.FC = () => {
   const { isSafeToRestartForUpdate, blockingReasons } = useUpdateSession();
   const [phase, setPhase] = useState<UiPhase>("idle");
@@ -28,24 +52,43 @@ const AppUpdatePanel: React.FC = () => {
   const [releaseNotes, setReleaseNotes] = useState<string[]>([]);
   const [backendInfo, setBackendInfo] = useState<VersionInfo | null>(null);
   const [backendCompat, setBackendCompat] = useState<string>("");
+  const [githubLatest, setGithubLatest] = useState<string>("");
+  const [githubNotes, setGithubNotes] = useState<string[]>([]);
 
   const updater = getZenHospUpdater();
+
+  const refreshInstalledVersion = useCallback(async () => {
+    if (!updater) return;
+    const v = await updater.getVersion();
+    setInstalledVersion(v.version);
+    setIsPackaged(v.isPackaged);
+    return v;
+  }, [updater]);
 
   useEffect(() => {
     if (!updater) return;
     let off: (() => void) | undefined;
 
-    void updater.getVersion().then((v) => {
-      setInstalledVersion(v.version);
-      setIsPackaged(v.isPackaged);
-    });
+    void (async () => {
+      const v = await refreshInstalledVersion();
+      const owner = v?.githubOwner || "";
+      const repo = v?.githubRepo || "";
+      if (owner && repo) {
+        try {
+          const gh = await fetchGitHubLatestDesktopVersion(owner, repo);
+          if (gh) {
+            setGithubLatest(gh.version);
+            setGithubNotes(gh.notes);
+          }
+        } catch {
+          /* GitHub unreachable — fall back to /api/version */
+        }
+      }
+    })();
 
     void fetchVersionInfo()
       .then((info) => {
         setBackendInfo(info);
-        if (installedVersion) {
-          setBackendCompat(evaluateVersionCompatibility(installedVersion, info));
-        }
       })
       .catch(() => {
         /* backend offline — panel still works for electron-updater */
@@ -94,13 +137,17 @@ const AppUpdatePanel: React.FC = () => {
           const notes = info?.releaseNotes;
           if (Array.isArray(notes)) setReleaseNotes(notes.map(String));
           else if (typeof notes === "string" && notes.trim()) setReleaseNotes([notes]);
-          setMessage("Update downloaded. Restart when you are finished with patient work.");
+          setMessage(
+            `Update v${info?.version || githubLatest || "new"} downloaded. Restart to run that version.`
+          );
           break;
         }
         case "error":
           setPhase("error");
           setMessage(
-            (evt.data as { message?: string })?.message || "Update error"
+            formatUpdaterError(
+              (evt.data as { message?: string })?.message || "Update error"
+            )
           );
           break;
         case "dev-skipped":
@@ -114,16 +161,24 @@ const AppUpdatePanel: React.FC = () => {
           break;
       }
     });
+    const onFocus = () => {
+      void refreshInstalledVersion();
+    };
+    window.addEventListener("focus", onFocus);
+
     return () => {
       off?.();
+      window.removeEventListener("focus", onFocus);
     };
-  }, [updater, installedVersion]);
+  }, [updater, refreshInstalledVersion]);
 
   useEffect(() => {
     if (installedVersion && backendInfo) {
-      setBackendCompat(evaluateVersionCompatibility(installedVersion, backendInfo));
+      setBackendCompat(
+        evaluateVersionCompatibility(installedVersion, backendInfo, githubLatest)
+      );
     }
-  }, [installedVersion, backendInfo]);
+  }, [installedVersion, backendInfo, githubLatest]);
 
   const handleCheck = useCallback(async () => {
     if (!updater) {
@@ -190,16 +245,23 @@ const AppUpdatePanel: React.FC = () => {
               <span className="ml-2 text-amber-700 text-xs">(dev / unpackaged)</span>
             )}
           </div>
-          {remoteVersion ? (
-            <div>
-              <span className="text-gray-600">Update server:</span> v{remoteVersion}
-            </div>
-          ) : backendInfo?.latestDesktopVersion ? (
-            <div>
-              <span className="text-gray-600">Latest (API):</span> v
-              {backendInfo.latestDesktopVersion}
-            </div>
-          ) : null}
+          {(() => {
+            const latest = pickNewerVersion(
+              remoteVersion,
+              pickNewerVersion(githubLatest, backendInfo?.latestDesktopVersion)
+            );
+            if (!latest) return null;
+            const source = remoteVersion
+              ? "update feed"
+              : githubLatest
+                ? "GitHub"
+                : "API";
+            return (
+              <div>
+                <span className="text-gray-600">Latest ({source}):</span> v{latest}
+              </div>
+            );
+          })()}
         </div>
         <div className="rounded border border-gray-200 p-3 bg-gray-50">
           <div className="font-medium text-gray-900 mb-2">Backend API</div>
@@ -230,11 +292,16 @@ const AppUpdatePanel: React.FC = () => {
       </div>
 
       {(releaseNotes.length > 0 ||
+        githubNotes.length > 0 ||
         (backendInfo?.releaseNotes?.length && phase !== "no-update")) ? (
         <div className="mb-4 rounded border border-gray-200 p-3 bg-white">
           <div className="text-sm font-medium text-gray-900 mb-2">What&apos;s new</div>
           <ul className="text-sm text-gray-700 list-disc list-inside space-y-0.5">
-            {(releaseNotes.length > 0 ? releaseNotes : backendInfo?.releaseNotes || [])
+            {(releaseNotes.length > 0
+              ? releaseNotes
+              : githubNotes.length > 0
+                ? githubNotes
+                : backendInfo?.releaseNotes || [])
               .slice(0, 8)
               .map((note) => (
                 <li key={note}>{note}</li>
@@ -310,11 +377,9 @@ const AppUpdatePanel: React.FC = () => {
       </div>
 
       <p className="mt-4 text-xs text-gray-500">
-        Packaged installs check{" "}
-        <code className="bg-gray-100 px-1 rounded">ZENHOSP_UPDATE_FEED_URL</code> or the feed URL
-        baked in at build time (S3 / CloudFront folder with Squirrel{" "}
-        <code className="bg-gray-100 px-1 rounded">RELEASES</code> + packages). Dev runs skip real
-        checks unless{" "}
+        Packaged installs use the GitHub Releases feed baked at build time (
+        <code className="bg-gray-100 px-1 rounded">latest.yml</code> + NSIS installer on the
+        latest release). Dev runs skip real checks unless{" "}
         <code className="bg-gray-100 px-1 rounded">ZENHOSP_UPDATER_TEST_DEV=1</code>.
       </p>
     </div>

@@ -17,6 +17,7 @@
     "release:sync-version": "node scripts/sync-release-version.mjs",
     "release:collect": "node scripts/collect-installer-artifacts.mjs",
     "release:publish-s3": "node scripts/publish-desktop-release.mjs",
+    "release:publish-github": "node scripts/publish-github-release.mjs",
     "release:prepare": "node scripts/sync-release-version.mjs && node scripts/generate-update-config.mjs",
     "release:build": "npm run release:prepare && npm run backend:build && electron-forge make && npm run release:collect",
     "lint": "eslint --ext .ts,.tsx,.js,.jsx .",

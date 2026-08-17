@@ -129,6 +129,8 @@ export function registerUpdaterIpcOnce(): void {
   ipcMain.handle("updater:get-version", () => ({
     version: app.getVersion(),
     isPackaged: app.isPackaged,
+    githubOwner: updateConfig?.owner || process.env.ZENHOSP_GITHUB_OWNER || "",
+    githubRepo: updateConfig?.repo || process.env.ZENHOSP_GITHUB_REPO || "",
   }));
 
   ipcMain.handle("updater:check", async () => {
@@ -161,8 +163,13 @@ export function registerUpdaterIpcOnce(): void {
       };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      sendToRenderer({ type: "error", data: { message } });
-      return { ok: false, error: message };
+      const friendly =
+        /Cannot find latest\.yml/i.test(message) ||
+        (/latest\.yml/i.test(message) && /404/i.test(message))
+          ? "Update feed is incomplete: latest.yml is missing from the GitHub release. Upload latest.yml (with the Setup.exe) to the latest release, then try again."
+          : message;
+      sendToRenderer({ type: "error", data: { message: friendly } });
+      return { ok: false, error: friendly };
     }
   });
 
