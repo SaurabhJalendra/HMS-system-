@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getZenHospUpdater, isZenHospUpdaterAvailable } from "../../lib/updater/zenhospUpdaterClient";
 import { useUpdateSession } from "../../lib/contexts/UpdateSessionContext";
 import {
@@ -6,6 +6,7 @@ import {
   fetchGitHubLatestDesktopVersion,
   evaluateVersionCompatibility,
   pickNewerVersion,
+  compareDesktop,
   type VersionInfo,
 } from "../../lib/api/services/versionService";
 
@@ -14,17 +15,20 @@ type UiPhase =
   | "checking"
   | "no-update"
   | "available"
+  | "awaiting-release"
   | "downloading"
   | "ready"
   | "error"
   | "dev-skipped";
+
+type InstallMethod = "electron-updater" | "github-installer" | null;
 
 /** Shorten electron-updater / GitHub dump into an actionable line. */
 function formatUpdaterError(raw: string): string {
   const text = (raw || "").trim();
   if (!text) return "Update error";
 
-  if (/Cannot find latest\.yml/i.test(text) || /latest\.yml/i.test(text) && /404/i.test(text)) {
+  if (/Cannot find latest\.yml/i.test(text) || (/latest\.yml/i.test(text) && /404/i.test(text))) {
     return (
       "Update feed is incomplete: latest.yml is missing from the GitHub release. " +
       "Publish artifacts with npm run release:publish-github -- --tag <version> " +
@@ -36,9 +40,25 @@ function formatUpdaterError(raw: string): string {
     return "Update check failed (GitHub 404). Confirm the release exists and includes latest.yml.";
   }
 
-  // Keep UI readable — full stack stays in main-process logs
   const firstLine = text.split(/\r?\n/)[0] || text;
   return firstLine.length > 280 ? `${firstLine.slice(0, 277)}…` : firstLine;
+}
+
+function isNewer(current: string, candidate?: string | null): boolean {
+  return Boolean(current && candidate && compareDesktop(current, candidate) < 0);
+}
+
+function stripHtml(raw: string): string {
+  return raw
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const AppUpdatePanel: React.FC = () => {
@@ -54,8 +74,53 @@ const AppUpdatePanel: React.FC = () => {
   const [backendCompat, setBackendCompat] = useState<string>("");
   const [githubLatest, setGithubLatest] = useState<string>("");
   const [githubNotes, setGithubNotes] = useState<string[]>([]);
+  const [installMethod, setInstallMethod] = useState<InstallMethod>(null);
+  const advertisedRef = useRef({ installed: "", github: "", api: "", feed: "" });
+  const didAutoCheck = useRef(false);
 
   const updater = getZenHospUpdater();
+
+  advertisedRef.current = {
+    installed: installedVersion,
+    github: githubLatest,
+    api: backendInfo?.latestDesktopVersion || "",
+    feed: remoteVersion,
+  };
+
+  const githubHasInstaller = isNewer(installedVersion, githubLatest);
+  const apiOnlyNewer =
+    !githubHasInstaller && isNewer(installedVersion, backendInfo?.latestDesktopVersion);
+  const advertisedLatest = pickNewerVersion(
+    remoteVersion,
+    pickNewerVersion(githubLatest, backendInfo?.latestDesktopVersion)
+  );
+  const showInstallSection =
+    githubHasInstaller ||
+    phase === "available" ||
+    phase === "downloading" ||
+    phase === "ready";
+
+  const applyNotAvailableState = useCallback(() => {
+    const { installed, github, api } = advertisedRef.current;
+    if (isNewer(installed, github)) {
+      setPhase("available");
+      setRemoteVersion(github);
+      setMessage(`Version ${github} is available. Download it from this screen to install.`);
+      return;
+    }
+    if (isNewer(installed, api)) {
+      setPhase("awaiting-release");
+      setMessage(
+        `The server lists v${api}, but GitHub still has v${github || installed}. ` +
+          "In-app install needs Setup.exe and latest.yml on that GitHub release."
+      );
+      return;
+    }
+    setPhase("no-update");
+    setRemoteVersion("");
+    setReleaseNotes([]);
+    setMessage("You are on the latest version from the update server.");
+  }, []);
 
   const refreshInstalledVersion = useCallback(async () => {
     if (!updater) return;
@@ -111,14 +176,11 @@ const AppUpdatePanel: React.FC = () => {
           const notes = info?.releaseNotes;
           if (Array.isArray(notes)) setReleaseNotes(notes.map(String));
           else if (typeof notes === "string" && notes.trim()) setReleaseNotes([notes]);
-          setMessage("A newer version is available.");
+          setMessage("A newer version is available. Download it below to install from this app.");
           break;
         }
         case "update-not-available":
-          setPhase("no-update");
-          setMessage("You are on the latest version from the update server.");
-          setRemoteVersion("");
-          setReleaseNotes([]);
+          applyNotAvailableState();
           break;
         case "download-progress":
           setPhase("downloading");
@@ -131,14 +193,22 @@ const AppUpdatePanel: React.FC = () => {
           setDownloadPercent(100);
           const info = evt.data as {
             version?: string;
+            method?: InstallMethod;
             releaseNotes?: string | string[];
           };
           setRemoteVersion(info?.version || "");
+          if (info?.method === "github-installer") {
+            setInstallMethod("github-installer");
+          } else {
+            setInstallMethod("electron-updater");
+          }
           const notes = info?.releaseNotes;
           if (Array.isArray(notes)) setReleaseNotes(notes.map(String));
           else if (typeof notes === "string" && notes.trim()) setReleaseNotes([notes]);
           setMessage(
-            `Update v${info?.version || githubLatest || "new"} downloaded. Restart to run that version.`
+            info?.method === "github-installer"
+              ? "Windows installer opened. Finish the setup wizard, then reopen ZenHosp."
+              : `Update v${info?.version || "new"} downloaded. Restart to install it.`
           );
           break;
         }
@@ -170,7 +240,7 @@ const AppUpdatePanel: React.FC = () => {
       off?.();
       window.removeEventListener("focus", onFocus);
     };
-  }, [updater, refreshInstalledVersion]);
+  }, [updater, refreshInstalledVersion, applyNotAvailableState]);
 
   useEffect(() => {
     if (installedVersion && backendInfo) {
@@ -179,6 +249,31 @@ const AppUpdatePanel: React.FC = () => {
       );
     }
   }, [installedVersion, backendInfo, githubLatest]);
+
+  useEffect(() => {
+    if (!installedVersion) return;
+    if (phase !== "idle" && phase !== "no-update" && phase !== "awaiting-release") return;
+    if (githubHasInstaller) {
+      setPhase("available");
+      setRemoteVersion(githubLatest);
+      setMessage(`Version ${githubLatest} is on GitHub. Download it below to install from this app.`);
+      return;
+    }
+    if (apiOnlyNewer && phase === "idle") {
+      setPhase("awaiting-release");
+      setMessage(
+        `The server lists v${backendInfo?.latestDesktopVersion}, but GitHub still has v${githubLatest || installedVersion}. ` +
+          "In-app install needs that GitHub release published."
+      );
+    }
+  }, [
+    installedVersion,
+    githubHasInstaller,
+    githubLatest,
+    apiOnlyNewer,
+    backendInfo?.latestDesktopVersion,
+    phase,
+  ]);
 
   const handleCheck = useCallback(async () => {
     if (!updater) {
@@ -194,21 +289,57 @@ const AppUpdatePanel: React.FC = () => {
       return;
     }
     if (!res.ok) {
-      setPhase("error");
-      setMessage(res.error || "Check failed");
+      applyNotAvailableState();
+      if (!githubHasInstaller && !apiOnlyNewer) {
+        setPhase("error");
+        setMessage(res.error || "Check failed");
+      }
+      return;
     }
-  }, [updater]);
+    const infoVersion = (res.updateInfo as { version?: string } | null)?.version || "";
+    if (isNewer(installedVersion, infoVersion)) {
+      setPhase("available");
+      setRemoteVersion(infoVersion);
+      setMessage(`Version ${infoVersion} is available. Download it below to install from this app.`);
+      return;
+    }
+    applyNotAvailableState();
+  }, [updater, installedVersion, githubHasInstaller, apiOnlyNewer, applyNotAvailableState]);
+
+  useEffect(() => {
+    if (!updater || !isPackaged || !installedVersion || didAutoCheck.current) return;
+    didAutoCheck.current = true;
+    const timer = window.setTimeout(() => {
+      void handleCheck();
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [updater, isPackaged, installedVersion, handleCheck]);
 
   const handleDownload = useCallback(async () => {
     if (!updater) return;
     setPhase("downloading");
     setDownloadPercent(0);
+    setInstallMethod(null);
     const res = await updater.downloadUpdate();
     if (!res.ok) {
+      if (updater.installFromGitHub && githubHasInstaller) {
+        const fallback = await updater.installFromGitHub();
+        if (fallback.ok) {
+          setInstallMethod("github-installer");
+          return;
+        }
+        setPhase("error");
+        setMessage(fallback.error || res.error || "Download failed");
+        return;
+      }
       setPhase("error");
       setMessage(res.error || "Download failed");
+      return;
     }
-  }, [updater]);
+    if (res.method === "github-installer") {
+      setInstallMethod("github-installer");
+    }
+  }, [updater, githubHasInstaller]);
 
   const handleRestart = useCallback(async () => {
     if (!updater) return;
@@ -226,6 +357,12 @@ const AppUpdatePanel: React.FC = () => {
       </div>
     );
   }
+
+  const latestSource = remoteVersion
+    ? "update feed"
+    : githubLatest
+      ? "GitHub"
+      : "API";
 
   return (
     <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
@@ -245,23 +382,11 @@ const AppUpdatePanel: React.FC = () => {
               <span className="ml-2 text-amber-700 text-xs">(dev / unpackaged)</span>
             )}
           </div>
-          {(() => {
-            const latest = pickNewerVersion(
-              remoteVersion,
-              pickNewerVersion(githubLatest, backendInfo?.latestDesktopVersion)
-            );
-            if (!latest) return null;
-            const source = remoteVersion
-              ? "update feed"
-              : githubLatest
-                ? "GitHub"
-                : "API";
-            return (
-              <div>
-                <span className="text-gray-600">Latest ({source}):</span> v{latest}
-              </div>
-            );
-          })()}
+          {advertisedLatest ? (
+            <div>
+              <span className="text-gray-600">Latest ({latestSource}):</span> v{advertisedLatest}
+            </div>
+          ) : null}
         </div>
         <div className="rounded border border-gray-200 p-3 bg-gray-50">
           <div className="font-medium text-gray-900 mb-2">Backend API</div>
@@ -302,6 +427,8 @@ const AppUpdatePanel: React.FC = () => {
               : githubNotes.length > 0
                 ? githubNotes
                 : backendInfo?.releaseNotes || [])
+              .map((note) => stripHtml(note))
+              .filter(Boolean)
               .slice(0, 8)
               .map((note) => (
                 <li key={note}>{note}</li>
@@ -317,30 +444,68 @@ const AppUpdatePanel: React.FC = () => {
               ? "bg-red-50 border-red-200 text-red-800"
               : phase === "no-update"
                 ? "bg-green-50 border-green-200 text-green-800"
-                : "bg-gray-50 border-gray-200 text-gray-800"
+                : phase === "awaiting-release"
+                  ? "bg-amber-50 border-amber-200 text-amber-900"
+                  : "bg-gray-50 border-gray-200 text-gray-800"
           }`}
         >
           {message}
         </div>
       ) : null}
 
-      {phase === "downloading" && downloadPercent !== null ? (
-        <div className="mb-4">
-          <div className="text-xs text-gray-600 mb-1">Download progress</div>
-          <div className="h-2 bg-gray-200 rounded overflow-hidden">
-            <div
-              className="h-full bg-blue-600 transition-all"
-              style={{ width: `${downloadPercent}%` }}
-            />
-          </div>
-          <div className="text-xs text-gray-500 mt-1">{downloadPercent}%</div>
-        </div>
-      ) : null}
+      {showInstallSection ? (
+        <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/60 p-4">
+          <div className="text-sm font-semibold text-indigo-950 mb-1">Install this update</div>
+          <p className="text-sm text-indigo-900 mb-3">
+            {phase === "ready"
+              ? installMethod === "github-installer"
+                ? "The Windows installer is open. Complete the wizard to finish installing, then reopen ZenHosp."
+                : `v${remoteVersion || githubLatest || advertisedLatest} is downloaded. Restart ZenHosp to install it.`
+              : `Download v${remoteVersion || githubLatest || advertisedLatest} and install it from this window. Do not use a browser download.`}
+          </p>
 
-      {!isSafeToRestartForUpdate && phase === "ready" ? (
-        <div className="mb-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 rounded">
-          Finish the current task before restarting. Active:{" "}
-          {blockingReasons.join(", ")}
+          {phase === "downloading" && downloadPercent !== null ? (
+            <div className="mb-3">
+              <div className="text-xs text-indigo-800 mb-1">Download progress</div>
+              <div className="h-2 bg-indigo-100 rounded overflow-hidden">
+                <div
+                  className="h-full bg-indigo-600 transition-all"
+                  style={{ width: `${downloadPercent}%` }}
+                />
+              </div>
+              <div className="text-xs text-indigo-700 mt-1">{downloadPercent}%</div>
+            </div>
+          ) : null}
+
+          {!isSafeToRestartForUpdate && phase === "ready" && installMethod !== "github-installer" ? (
+            <div className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 rounded">
+              Finish the current task before restarting. Active:{" "}
+              {blockingReasons.join(", ")}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            {(phase === "available" || githubHasInstaller) && phase !== "downloading" && phase !== "ready" ? (
+              <button
+                type="button"
+                onClick={handleDownload}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700"
+              >
+                Download and install
+              </button>
+            ) : null}
+
+            {phase === "ready" && installMethod !== "github-installer" ? (
+              <button
+                type="button"
+                onClick={handleRestart}
+                disabled={!isSafeToRestartForUpdate}
+                className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Restart and install
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -353,27 +518,6 @@ const AppUpdatePanel: React.FC = () => {
         >
           {phase === "checking" ? "Checking…" : "Check for updates"}
         </button>
-
-        {phase === "available" && (
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700"
-          >
-            Download update
-          </button>
-        )}
-
-        {phase === "ready" && (
-          <button
-            type="button"
-            onClick={handleRestart}
-            disabled={!isSafeToRestartForUpdate}
-            className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Restart and install
-          </button>
-        )}
       </div>
 
       <p className="mt-4 text-xs text-gray-500">

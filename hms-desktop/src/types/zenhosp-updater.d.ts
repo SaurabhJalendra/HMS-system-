@@ -16,7 +16,18 @@ export type ZenHospUpdaterAPI = {
     error?: string;
     updateInfo?: unknown;
   }>;
-  downloadUpdate: () => Promise<{ ok: boolean; error?: string }>;
+  downloadUpdate: () => Promise<{
+    ok: boolean;
+    error?: string;
+    method?: "electron-updater" | "github-installer";
+    version?: string;
+  }>;
+  installFromGitHub?: () => Promise<{
+    ok: boolean;
+    error?: string;
+    method?: string;
+    version?: string;
+  }>;
   quitAndInstall: () => Promise<{ ok: boolean }>;
   onUpdaterEvent: (handler: (payload: UpdaterEventPayload) => void) => () => void;
 };

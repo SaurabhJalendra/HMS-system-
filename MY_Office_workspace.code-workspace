@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"name": "Hub — Master Skills",
+			"path": "../../Downloads/developer-operating-system/Hub_MasterSkills"
+		},
+		{
+			"name": "HMS-system- (ZenHosp)",
+			"path": "."
+		},
+		{
+			"name": "Crumbsy",
+			"path": "../../Downloads/Crumbsy"
+		},
+		{
+			"name": "AI Tech Aggregator",
+			"path": "../AI_tech_aggregator"
+		},
+		{
+			"name": "SkinDB",
+			"path": "../SkinDB"
+		}
+	],
+	"settings": {}
+}

@@ -65,6 +65,13 @@ export async function fetchGitHubLatestDesktopVersion(
   const version = normalizeDesktopVersion(body.tag_name || body.name || "");
   if (!version) return null;
   const notes = (body.body || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
     .split("\n")
     .map((line) => line.replace(/^[-*]\s*/, "").trim())
     .filter(Boolean)
