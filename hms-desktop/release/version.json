@@ -1,0 +1,11 @@
+{
+  "version": "1.0.3",
+  "backendVersion": "1.0.3",
+  "minimumDesktopVersion": "1.0.0",
+  "latestDesktopVersion": "1.0.3",
+  "releaseNotes": [
+    "In-app updates from GitHub Releases",
+    "Clinic API URL persistence"
+  ],
+  "publishedAt": "2026-08-12T05:02:19Z"
+}
