@@ -382,6 +382,9 @@ const AppUpdatePanel: React.FC = () => {
               <span className="ml-2 text-amber-700 text-xs">(dev / unpackaged)</span>
             )}
           </div>
+          <div>
+            <span className="text-gray-600">Update channel:</span> GitHub Releases
+          </div>
           {advertisedLatest ? (
             <div>
               <span className="text-gray-600">Latest ({latestSource}):</span> v{advertisedLatest}
