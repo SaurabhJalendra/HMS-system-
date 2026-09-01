@@ -4,7 +4,7 @@
   "minimumDesktopVersion": "1.0.0",
   "latestDesktopVersion": "1.0.5",
   "releaseNotes": [
-    "Hide default login credentials on the sign-in screen"
+    "Quit and relaunch automatically after Download and install"
   ],
   "publishedAt": "2026-08-12T05:02:19Z"
 }
