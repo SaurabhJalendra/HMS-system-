@@ -77,6 +77,7 @@ const AppUpdatePanel: React.FC = () => {
   const [installMethod, setInstallMethod] = useState<InstallMethod>(null);
   const advertisedRef = useRef({ installed: "", github: "", api: "", feed: "" });
   const didAutoCheck = useRef(false);
+  const didScheduleQuitAndInstall = useRef(false);
 
   const updater = getZenHospUpdater();
 
@@ -206,9 +207,7 @@ const AppUpdatePanel: React.FC = () => {
           if (Array.isArray(notes)) setReleaseNotes(notes.map(String));
           else if (typeof notes === "string" && notes.trim()) setReleaseNotes([notes]);
           setMessage(
-            info?.method === "github-installer"
-              ? "Windows installer opened. Finish the setup wizard, then reopen ZenHosp."
-              : `Update v${info?.version || "new"} downloaded. Restart to install it.`
+            `Update v${info?.version || "new"} downloaded. ZenHosp will close, install it, and reopen.`
           );
           break;
         }
@@ -315,17 +314,35 @@ const AppUpdatePanel: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [updater, isPackaged, installedVersion, handleCheck]);
 
+  const scheduleQuitAndInstall = useCallback(() => {
+    if (!updater || didScheduleQuitAndInstall.current) return;
+    if (!isSafeToRestartForUpdate) {
+      setMessage(
+        "Download complete. Finish the current task, then click Restart and install."
+      );
+      return;
+    }
+    didScheduleQuitAndInstall.current = true;
+    setMessage("Download complete. Closing ZenHosp to install the update…");
+    window.setTimeout(() => {
+      void updater.quitAndInstall();
+    }, 700);
+  }, [updater, isSafeToRestartForUpdate]);
+
   const handleDownload = useCallback(async () => {
     if (!updater) return;
     setPhase("downloading");
     setDownloadPercent(0);
     setInstallMethod(null);
+    didScheduleQuitAndInstall.current = false;
     const res = await updater.downloadUpdate();
     if (!res.ok) {
       if (updater.installFromGitHub && githubHasInstaller) {
         const fallback = await updater.installFromGitHub();
         if (fallback.ok) {
           setInstallMethod("github-installer");
+          setPhase("ready");
+          scheduleQuitAndInstall();
           return;
         }
         setPhase("error");
@@ -339,11 +356,14 @@ const AppUpdatePanel: React.FC = () => {
     if (res.method === "github-installer") {
       setInstallMethod("github-installer");
     }
-  }, [updater, githubHasInstaller]);
+    setPhase("ready");
+    scheduleQuitAndInstall();
+  }, [updater, githubHasInstaller, scheduleQuitAndInstall]);
 
   const handleRestart = useCallback(async () => {
     if (!updater) return;
     if (!isSafeToRestartForUpdate) return;
+    didScheduleQuitAndInstall.current = true;
     await updater.quitAndInstall();
   }, [updater, isSafeToRestartForUpdate]);
 
@@ -368,8 +388,8 @@ const AppUpdatePanel: React.FC = () => {
     <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
       <h2 className="text-xl font-semibold text-gray-900 mb-2">App updates</h2>
       <p className="text-sm text-gray-600 mb-4">
-        Check for a newer ZenHosp build, download it, then restart when no patient registration,
-        consultation, or prescription is in progress.
+        Check for a newer ZenHosp build, then click Download and install. When the download
+        finishes and no patient work is in progress, ZenHosp closes, installs, and reopens.
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-800 mb-4">
@@ -461,10 +481,8 @@ const AppUpdatePanel: React.FC = () => {
           <div className="text-sm font-semibold text-indigo-950 mb-1">Install this update</div>
           <p className="text-sm text-indigo-900 mb-3">
             {phase === "ready"
-              ? installMethod === "github-installer"
-                ? "The Windows installer is open. Complete the wizard to finish installing, then reopen ZenHosp."
-                : `v${remoteVersion || githubLatest || advertisedLatest} is downloaded. Restart ZenHosp to install it.`
-              : `Download v${remoteVersion || githubLatest || advertisedLatest} and install it from this window. Do not use a browser download.`}
+              ? `v${remoteVersion || githubLatest || advertisedLatest} is downloaded. ZenHosp will close, install it, and reopen.`
+              : `Download v${remoteVersion || githubLatest || advertisedLatest} from this window. When it finishes, ZenHosp will quit and restart on the new version.`}
           </p>
 
           {phase === "downloading" && downloadPercent !== null ? (
@@ -480,7 +498,7 @@ const AppUpdatePanel: React.FC = () => {
             </div>
           ) : null}
 
-          {!isSafeToRestartForUpdate && phase === "ready" && installMethod !== "github-installer" ? (
+          {!isSafeToRestartForUpdate && phase === "ready" ? (
             <div className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 rounded">
               Finish the current task before restarting. Active:{" "}
               {blockingReasons.join(", ")}
@@ -498,7 +516,7 @@ const AppUpdatePanel: React.FC = () => {
               </button>
             ) : null}
 
-            {phase === "ready" && installMethod !== "github-installer" ? (
+            {phase === "ready" ? (
               <button
                 type="button"
                 onClick={handleRestart}

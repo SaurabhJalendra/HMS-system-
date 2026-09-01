@@ -1,9 +1,11 @@
-import { ipcMain, app, BrowserWindow, shell } from "electron";
-import { createWriteStream } from "node:fs";
+import { ipcMain, app, BrowserWindow } from "electron";
+import { spawn } from "node:child_process";
+import { createWriteStream, existsSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import path from "node:path";
 import { autoUpdater } from "electron-updater";
+import { buildDelayedNsisInstallCommand } from "./nsisUpdateLaunch";
 import bundledUpdateConfig from "./update-config.json";
 
 type BundledUpdateConfig = {
@@ -19,6 +21,7 @@ const updateConfig = bundledUpdateConfig as BundledUpdateConfig;
 let targetWindow: BrowserWindow | null = null;
 let listenersBound = false;
 let feedConfigured = false;
+let pendingGithubInstaller: { path: string; version?: string } | null = null;
 
 function sendToRenderer(payload: { type: string; data?: unknown }) {
   try {
@@ -106,7 +109,7 @@ function compareAppVersion(a: string, b: string): number {
   return 0;
 }
 
-async function downloadAndOpenGithubInstaller(): Promise<{
+async function downloadGithubInstaller(): Promise<{
   ok: boolean;
   error?: string;
   version?: string;
@@ -183,20 +186,14 @@ async function downloadAndOpenGithubInstaller(): Promise<{
     await pipeline(nodeStream, createWriteStream(dest));
     sendToRenderer({ type: "download-progress", data: { percent: 100 } });
 
-    const opened = await shell.openPath(dest);
-    if (opened) {
-      const msg = `Downloaded ${asset.name} but Windows could not open it: ${opened}`;
-      sendToRenderer({ type: "error", data: { message: msg } });
-      return { ok: false, error: msg };
-    }
-
+    pendingGithubInstaller = { path: dest, version };
     sendToRenderer({
       type: "update-downloaded",
       data: {
         version,
         method: "github-installer",
         releaseNotes: [
-          "Windows installer opened. Finish the setup wizard, then reopen ZenHosp.",
+          "Download complete. ZenHosp will close, install the update, and reopen.",
         ],
       },
     });
@@ -308,17 +305,57 @@ export function registerUpdaterIpcOnce(): void {
         /* fall through to GitHub Setup.exe */
       }
     }
-    return downloadAndOpenGithubInstaller();
+    return downloadGithubInstaller();
   });
 
   ipcMain.handle("updater:install-github-release", async () => {
-    return downloadAndOpenGithubInstaller();
+    return downloadGithubInstaller();
   });
 
   ipcMain.handle("updater:quit-and-install", () => {
+    if (pendingGithubInstaller?.path) {
+      return launchGithubInstallerThenQuit();
+    }
     setImmediate(() => {
-      autoUpdater.quitAndInstall(false, true);
+      try {
+        // Silent + relaunch so NSIS does not ask the user to close ZenHosp.
+        autoUpdater.quitAndInstall(true, true);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        sendToRenderer({ type: "error", data: { message } });
+      }
     });
-    return { ok: true };
+    return { ok: true, method: "electron-updater" as const };
   });
+}
+
+function launchGithubInstallerThenQuit(): {
+  ok: boolean;
+  error?: string;
+  method?: string;
+} {
+  const installerPath = pendingGithubInstaller?.path;
+  if (!installerPath || !existsSync(installerPath)) {
+    const msg = "The downloaded installer is missing. Download the update again.";
+    sendToRenderer({ type: "error", data: { message: msg } });
+    return { ok: false, error: msg };
+  }
+
+  const { file, args } = buildDelayedNsisInstallCommand(installerPath);
+  const child = spawn(file, args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+
+  // Exit immediately so Program Files unlocks before NSIS starts (~2s later).
+  setImmediate(() => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.removeAllListeners("close");
+      if (!win.isDestroyed()) win.close();
+    }
+    app.exit(0);
+  });
+  return { ok: true, method: "github-installer" };
 }

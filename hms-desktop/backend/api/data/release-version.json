@@ -1,8 +1,8 @@
 {
-  "version": "1.0.4",
-  "backendVersion": "1.0.4",
+  "version": "1.0.5",
+  "backendVersion": "1.0.5",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.4",
+  "latestDesktopVersion": "1.0.5",
   "releaseNotes": [
     "Hide default login credentials on the sign-in screen"
   ],
