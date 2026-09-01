@@ -1,8 +1,8 @@
 {
-  "version": "1.0.5",
-  "backendVersion": "1.0.5",
+  "version": "1.0.6",
+  "backendVersion": "1.0.6",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.5",
+  "latestDesktopVersion": "1.0.6",
   "releaseNotes": [
     "Quit and relaunch automatically after Download and install"
   ],
