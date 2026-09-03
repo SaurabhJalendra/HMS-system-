@@ -13,6 +13,7 @@ interface CreateUserRequest {
   email?: string;
   phone?: string;
   department?: string;
+  consultationFee?: number | null;
 }
 
 interface UpdateUserRequest {
@@ -23,6 +24,7 @@ interface UpdateUserRequest {
   phone?: string;
   department?: string;
   isActive?: boolean;
+  consultationFee?: number | null;
 }
 
 interface UserStats {

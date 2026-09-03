@@ -32,7 +32,7 @@ export interface HospitalConfig {
   displayCurrency?: string; // Display currency for UI (if different from base currency)
   taxRate?: number;
   medicineMarkupPercentage?: number;
-  /** Default OPD consultation fee (used for new consultations and billing when stored fee is 0). */
+  /** Fallback OPD consultation fee when a doctor has no personal fee. */
   defaultConsultationFee?: number | string | null;
   
   // Appointment Settings

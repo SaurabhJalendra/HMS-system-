@@ -9,6 +9,7 @@ import {
   getRoleDisplayInfo,
   hasIPDSubModuleAccess,
   getAvailableIPDSubModules,
+  roleUsesConsultationFee,
 } from '../../lib/utils/rolePermissions';
 import { UserRole } from '../../lib/api/types';
 
@@ -112,6 +113,19 @@ describe('Role Permissions', () => {
       expect(canAccessFinancials(UserRole.DOCTOR)).toBe(false);
       expect(canAccessFinancials(UserRole.LAB_TECH)).toBe(false);
       expect(canAccessFinancials(UserRole.PHARMACY)).toBe(false);
+    });
+  });
+
+  describe('roleUsesConsultationFee', () => {
+    it('should be true for doctors and admins', () => {
+      expect(roleUsesConsultationFee(UserRole.DOCTOR)).toBe(true);
+      expect(roleUsesConsultationFee(UserRole.ADMIN)).toBe(true);
+    });
+
+    it('should be false for other roles', () => {
+      expect(roleUsesConsultationFee(UserRole.RECEPTIONIST)).toBe(false);
+      expect(roleUsesConsultationFee(UserRole.PHARMACY)).toBe(false);
+      expect(roleUsesConsultationFee(UserRole.NURSE)).toBe(false);
     });
   });
 

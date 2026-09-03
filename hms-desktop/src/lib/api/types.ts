@@ -262,6 +262,10 @@ export interface User {
   username: string;
   fullName: string;
   role: UserRole;
+  email?: string | null;
+  phone?: string | null;
+  /** Personal OPD fee (INR). Null = hospital default. */
+  consultationFee?: number | string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -379,7 +383,7 @@ export interface Consultation {
   doctorId: string;
   diagnosis: string;
   notes?: string;
-  /** OPD consultation fee (from hospital default at create time unless overridden). */
+  /** OPD consultation fee snapshotted at create (doctor fee, else hospital default). */
   fee?: number | string;
   consultationDate: string;
   createdAt: string;

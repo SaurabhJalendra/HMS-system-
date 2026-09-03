@@ -1,6 +1,6 @@
 {
   "name": "hms-system",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "Hospital Management System - Complete Desktop Application",
   "main": "index.js",
   "scripts": {

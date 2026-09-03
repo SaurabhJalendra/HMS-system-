@@ -357,7 +357,7 @@ export const infoContent = {
       overview: {
         title: 'OPD billing',
         content:
-          'Pick patient and optional date range, load billable items by section, select lines, then save or export. Uses hospital tax settings and optional default consultation fee from Configuration.',
+          'Pick patient and optional date range, load billable items by section, select lines, then save or export. Consultation lines use the fee stored on that visit (the doctor’s fee at consult time, otherwise the hospital default).',
       },
       billCreation: {
         title: 'Bill lines',
@@ -505,7 +505,7 @@ export const infoContent = {
       overview: {
         title: 'Accounts',
         content:
-          'Users authenticate with username/password; role controls module access from the dashboard and navigation.',
+          'Users authenticate with username/password; role controls module access from the dashboard and navigation. Doctors require a personal consultation fee, which is copied onto each OPD visit bill.',
       },
       roles: {
         title: 'Roles',
@@ -546,7 +546,7 @@ export const infoContent = {
   configuration: {
     title: 'Configuration',
     description:
-      'Hospital profile and operations: identity, logo, address, timezone, currencies, appointment slots, default consultation fee, module toggles, and bank/invoice footer fields used on PDFs. Changes apply app-wide after save.',
+          'Hospital profile and operations: identity, logo, address, timezone, currencies, appointment slots, default consultation fee (fallback when a doctor has no personal fee), module toggles, and bank/invoice footer fields used on PDFs. Changes apply app-wide after save.',
     sections: {
       overview: {
         title: 'Hospital profile',

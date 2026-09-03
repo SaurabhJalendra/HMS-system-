@@ -89,6 +89,10 @@ export const canAccessFinancials = (userRole) => {
   return rolePermissions[userRole]?.canAccessFinancials || false;
 };
 
+export const roleUsesConsultationFee = (userRole) => {
+  return userRole === UserRole.DOCTOR || userRole === UserRole.ADMIN;
+};
+
 // Get role-specific module definitions
 export const getRoleBasedModules = (userRole) => {
   const allModules = {

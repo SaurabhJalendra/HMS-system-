@@ -22,6 +22,8 @@ model User {
   registrationNumber String?  @map("registration_number") // Medical registration/license number
   phone              String? // Contact phone number
   email              String? // Contact email
+  /// OPD consultation fee for this clinician (INR). Null = use hospital defaultConsultationFee.
+  consultationFee    Decimal? @map("consultation_fee") @db.Decimal(10, 2)
   isActive           Boolean  @default(true) @map("is_active")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")

@@ -26,6 +26,7 @@ export interface User {
   registrationNumber?: string;
   phone?: string;
   email?: string;
+  consultationFee?: number | string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

@@ -3,6 +3,7 @@ import { logAudit } from '../utils/auditLogger';
 import { PrismaClient, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
+import { resolveConsultationFee } from '../utils/hospitalHelper';
 
 const prisma = new PrismaClient();
 
@@ -93,11 +94,7 @@ export const createConsultation = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Fetch default consultation fee from hospital config
-    const hospitalConfig = await prisma.hospitalConfig.findFirst();
-    const defaultFee = hospitalConfig?.defaultConsultationFee 
-      ? Number(hospitalConfig.defaultConsultationFee) 
-      : 0;
+    const fee = await resolveConsultationFee(appointment.doctor?.consultationFee);
 
     const { heldUntil: heldUntilRaw, ...consultationRest } = validatedData;
     let heldUntil: Date | null = null;
@@ -116,7 +113,7 @@ export const createConsultation = async (req: AuthRequest, res: Response) => {
       data: {
         ...consultationRest,
         heldUntil,
-        fee: defaultFee,
+        fee,
         consultationDate: new Date(),
       },
       include: {
