@@ -21,6 +21,8 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -47,9 +49,11 @@ jobs:
               const fs = require('fs');
               const p = 'package.json';
               const pkg = JSON.parse(fs.readFileSync(p,'utf8'));
-              pkg.version = process.env.TAG;
+              const v = process.argv[1];
+              if (!v) throw new Error('Missing tag version in argv');
+              pkg.version = v;
               fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
-            " TAG="$TAG"
+            " "$TAG"
           fi
           node scripts/sync-release-version.mjs
 
