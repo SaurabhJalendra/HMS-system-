@@ -1,13 +1,13 @@
 {
   "name": "hms-backend",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "HMS Desktop Application Backend API",
   "main": "dist/index.js",
   "directories": {
     "test": "tests"
   },
   "scripts": {
-    "build": "tsc && node -e \"require('fs').cpSync('api/data','dist/data',{recursive:true})\"",
+    "build": "prisma generate && tsc && node -e \"require('fs').cpSync('api/data','dist/data',{recursive:true})\"",
     "start": "node dist/index.js",
     "dev": "nodemon --exec ts-node api/index.ts",
     "test": "jest",
