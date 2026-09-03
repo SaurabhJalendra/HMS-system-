@@ -1,10 +1,10 @@
 {
-  "version": "1.0.6",
-  "backendVersion": "1.0.6",
+  "version": "1.0.7",
+  "backendVersion": "1.0.7",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.6",
+  "latestDesktopVersion": "1.0.7",
   "releaseNotes": [
-    "Quit and relaunch automatically after Download and install"
+    "Add doctor consultation fee and automatic patient billing"
   ],
-  "publishedAt": "2026-08-12T05:02:19Z"
+  "publishedAt": "2026-09-03T12:35:00Z"
 }
