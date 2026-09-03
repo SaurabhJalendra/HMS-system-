@@ -1106,7 +1106,7 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Default Consultation Fee <span className="text-blue-600 font-semibold">*</span> ({profileData.currency || 'USD'})
+                    Default Consultation Fee <span className="text-blue-600 font-semibold">*</span> ({profileData.currency || 'INR'})
                   </label>
                   <input
                     type="text"
@@ -1120,8 +1120,7 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
                     className="w-full px-4 py-2 border-2 border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg font-medium"
                   />
                   <p className="mt-2 text-sm text-gray-600 bg-blue-50 p-3 rounded-md">
-                    <strong>💡 Important:</strong> This fee will be automatically applied to <strong>all new consultations</strong> for <strong>all doctors</strong>. 
-                    The amount is stored in your base currency ({profileData.currency || 'USD'}) and will be converted to your display currency ({profileData.displayCurrency || profileData.currency || 'USD'}) when shown in bills.
+                    <strong>Fallback only:</strong> used for new consultations when that doctor has no personal consultation fee on their user record. Doctors created in User Management keep their own fee on each visit.
                   </p>
                 </div>
               </div>

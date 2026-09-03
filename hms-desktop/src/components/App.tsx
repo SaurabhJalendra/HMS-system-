@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { config } from '../config/environment';
+import { persistApiUrl, resolveStartupApiUrl } from '../lib/api/runtimeApiUrl';
 import authService from '../lib/api/services/authService';
 import configService from '../lib/api/services/configService';
 import { hasModuleAccess } from '../lib/utils/rolePermissions';
@@ -51,9 +52,22 @@ const App: React.FC = () => {
   const [retryIntervalId, setRetryIntervalId] = useState<NodeJS.Timeout | null>(null);
   const [hospitalLogoUrl, setHospitalLogoUrl] = useState<string>("");
   const [hospitalDisplayName, setHospitalDisplayName] = useState<string>("");
+  const [apiUrl, setApiUrl] = useState<string>(config.API_URL);
+  const [apiUrlDraft, setApiUrlDraft] = useState<string>(config.API_URL);
+  const [apiUrlError, setApiUrlError] = useState<string>("");
 
   useEffect(() => {
-    checkSetupState();
+    let cancelled = false;
+    void (async () => {
+      const url = await resolveStartupApiUrl();
+      if (cancelled) return;
+      setApiUrl(url);
+      setApiUrlDraft(url);
+      await checkSetupState();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -125,7 +139,7 @@ const App: React.FC = () => {
       setIsLoading(true);
       
       console.log('🔍 Checking backend connection...');
-      console.log('API URL:', config.API_URL);
+      console.log('API URL:', config.API_URL || apiUrl);
       
       // Add timeout to prevent hanging (reduced to 3 seconds for faster retries)
       const timeoutPromise = new Promise((_, reject) => 
@@ -491,8 +505,8 @@ const App: React.FC = () => {
               className: 'bg-gray-50 border border-gray-200 rounded-lg p-4 text-left',
               style: { fontFamily: 'monospace', fontSize: '12px' }
             },
-            React.createElement('p', { className: 'font-semibold mb-2' }, 'API URL:', React.createElement('span', { className: 'text-blue-600' }, config.API_URL)),
-            React.createElement('p', { className: 'text-gray-600' }, 'Expected backend:', React.createElement('span', { className: 'text-blue-600 ml-1' }, config.API_URL.replace('/api', '')))
+            React.createElement('p', { className: 'font-semibold mb-2' }, 'API URL:', React.createElement('span', { className: 'text-blue-600' }, apiUrl)),
+            React.createElement('p', { className: 'text-gray-600' }, 'Expected backend:', React.createElement('span', { className: 'text-blue-600 ml-1' }, apiUrl.replace('/api', '')))
           )
         ),
         React.createElement(
@@ -522,7 +536,7 @@ const App: React.FC = () => {
               React.createElement(
                 'code',
                 { className: 'block mt-2 bg-gray-100 p-2 rounded font-mono text-sm' },
-                config.API_URL.replace('/api', '')
+                apiUrl.replace('/api', '')
               )
             ),
             React.createElement(
@@ -532,17 +546,45 @@ const App: React.FC = () => {
               React.createElement(
                 'code',
                 { className: 'block mt-2 bg-gray-100 p-2 rounded font-mono text-sm' },
-                `${config.API_URL.replace('/api', '')}/health`
+                `${apiUrl.replace('/api', '')}/health`
               )
             ),
             React.createElement(
               'li',
               null,
-              'If this points to the wrong host, rebuild the installer with ',
+              'Backend API URL (saved on this PC; used on every launch):',
+              React.createElement('input', {
+                type: 'text',
+                value: apiUrlDraft,
+                onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
+                  setApiUrlDraft(event.target.value);
+                  setApiUrlError('');
+                },
+                className: 'block mt-2 w-full bg-white border border-gray-300 p-2 rounded font-mono text-sm',
+              }),
+              apiUrlError
+                ? React.createElement('p', { className: 'mt-1 text-sm text-red-700' }, apiUrlError)
+                : null,
               React.createElement(
-                'code',
-                { className: 'bg-green-100 px-2 py-1 rounded text-sm' },
-                'VITE_API_URL'
+                'button',
+                {
+                  type: 'button',
+                  onClick: async () => {
+                    try {
+                      setApiUrlError('');
+                      const next = await persistApiUrl(apiUrlDraft);
+                      setApiUrl(next);
+                      setApiUrlDraft(next);
+                      setBackendRetryCount(0);
+                      setSetupState(null);
+                      await checkSetupState();
+                    } catch (error: any) {
+                      setApiUrlError(error?.message || 'Could not save API URL');
+                    }
+                  },
+                  className: 'mt-3 bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 font-semibold',
+                },
+                'Save server URL and connect'
               )
             ),
             React.createElement(

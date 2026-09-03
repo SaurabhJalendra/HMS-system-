@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -50,5 +50,34 @@ export async function getHospitalConfig() {
     console.error('Error getting hospital config:', error);
     return null;
   }
+}
+
+/** Doctors and admins who also take OPD can have a personal consultation fee. */
+export function roleStoresConsultationFee(role: UserRole): boolean {
+  return role === UserRole.DOCTOR || role === UserRole.ADMIN;
+}
+
+/**
+ * Snapshot fee for a new consultation: clinician personal fee, else hospital default, else 0.
+ * A stored 0 on the user is a real fee (free consult) — do not fall back.
+ */
+export async function resolveConsultationFee(doctorFee: unknown): Promise<number> {
+  if (doctorFee != null && doctorFee !== '') {
+    const n = Number(doctorFee);
+    if (Number.isFinite(n) && n >= 0) {
+      return n;
+    }
+  }
+
+  const hospitalConfig = await getHospitalConfig();
+  const fallback = hospitalConfig?.defaultConsultationFee;
+  if (fallback != null && String(fallback) !== '') {
+    const n = Number(fallback);
+    if (Number.isFinite(n) && n >= 0) {
+      return n;
+    }
+  }
+
+  return 0;
 }
 

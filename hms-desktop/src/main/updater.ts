@@ -1,5 +1,11 @@
 import { ipcMain, app, BrowserWindow } from "electron";
+import { spawn } from "node:child_process";
+import { createWriteStream, existsSync } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
+import path from "node:path";
 import { autoUpdater } from "electron-updater";
+import { buildDelayedNsisInstallCommand } from "./nsisUpdateLaunch";
 import bundledUpdateConfig from "./update-config.json";
 
 type BundledUpdateConfig = {
@@ -15,6 +21,7 @@ const updateConfig = bundledUpdateConfig as BundledUpdateConfig;
 let targetWindow: BrowserWindow | null = null;
 let listenersBound = false;
 let feedConfigured = false;
+let pendingGithubInstaller: { path: string; version?: string } | null = null;
 
 function sendToRenderer(payload: { type: string; data?: unknown }) {
   try {
@@ -83,6 +90,119 @@ function feedNotConfiguredMessage(): string {
     return "Update feed is not configured. Set provider/owner/repo in update-config.json (or ZENHOSP_GITHUB_OWNER / ZENHOSP_GITHUB_REPO).";
   }
   return "Update feed is not configured. Set ZENHOSP_UPDATE_FEED_URL for the generic provider.";
+}
+
+function compareAppVersion(a: string, b: string): number {
+  const parse = (value: string) =>
+    value
+      .trim()
+      .replace(/^v/i, "")
+      .split("-")[0]
+      .split(".")
+      .map((part) => parseInt(part, 10) || 0);
+  const left = parse(a);
+  const right = parse(b);
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+async function downloadGithubInstaller(): Promise<{
+  ok: boolean;
+  error?: string;
+  version?: string;
+  method?: string;
+}> {
+  const owner =
+    updateConfig?.owner?.trim() || process.env.ZENHOSP_GITHUB_OWNER?.trim() || "";
+  const repo =
+    updateConfig?.repo?.trim() || process.env.ZENHOSP_GITHUB_REPO?.trim() || "";
+  if (!owner || !repo) {
+    return { ok: false, error: feedNotConfiguredMessage() };
+  }
+
+  sendToRenderer({ type: "checking-for-update" });
+  try {
+    const releaseRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/releases/latest`,
+      { headers: { Accept: "application/vnd.github+json" }, redirect: "follow" }
+    );
+    if (!releaseRes.ok) {
+      const msg = `GitHub release lookup failed (${releaseRes.status}).`;
+      sendToRenderer({ type: "error", data: { message: msg } });
+      return { ok: false, error: msg };
+    }
+    const release = (await releaseRes.json()) as {
+      tag_name?: string;
+      assets?: Array<{ name: string; browser_download_url: string; size?: number }>;
+    };
+    const version = String(release.tag_name || "").replace(/^v/i, "");
+    if (version && compareAppVersion(app.getVersion(), version) >= 0) {
+      const msg = `GitHub latest is v${version}, which is already installed. Publish a newer release (Setup.exe + latest.yml), then try again.`;
+      sendToRenderer({ type: "update-not-available", data: { version } });
+      return { ok: false, error: msg };
+    }
+
+    const asset = (release.assets || []).find(
+      (item) => /\.exe$/i.test(item.name) && !/\.blockmap$/i.test(item.name)
+    );
+    if (!asset?.browser_download_url) {
+      const msg =
+        "No Setup.exe on the latest GitHub release. Publish the installer with latest.yml, then try again.";
+      sendToRenderer({ type: "error", data: { message: msg } });
+      return { ok: false, error: msg };
+    }
+
+    sendToRenderer({
+      type: "update-available",
+      data: { version, releaseNotes: [`GitHub ${release.tag_name}`] },
+    });
+    sendToRenderer({ type: "download-progress", data: { percent: 1 } });
+
+    const fileRes = await fetch(asset.browser_download_url, { redirect: "follow" });
+    if (!fileRes.ok || !fileRes.body) {
+      const msg = `Failed to download ${asset.name} (${fileRes.status}).`;
+      sendToRenderer({ type: "error", data: { message: msg } });
+      return { ok: false, error: msg };
+    }
+
+    const dest = path.join(app.getPath("temp"), asset.name);
+    const total = Number(asset.size || fileRes.headers.get("content-length") || 0);
+    let received = 0;
+    const nodeStream = Readable.fromWeb(
+      fileRes.body as import("node:stream/web").ReadableStream
+    );
+    nodeStream.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+      if (total > 0) {
+        sendToRenderer({
+          type: "download-progress",
+          data: { percent: Math.min(99, Math.round((received / total) * 100)) },
+        });
+      }
+    });
+    await pipeline(nodeStream, createWriteStream(dest));
+    sendToRenderer({ type: "download-progress", data: { percent: 100 } });
+
+    pendingGithubInstaller = { path: dest, version };
+    sendToRenderer({
+      type: "update-downloaded",
+      data: {
+        version,
+        method: "github-installer",
+        releaseNotes: [
+          "Download complete. ZenHosp will close, install the update, and reopen.",
+        ],
+      },
+    });
+    return { ok: true, version, method: "github-installer" };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    sendToRenderer({ type: "error", data: { message } });
+    return { ok: false, error: message };
+  }
 }
 
 function bindAutoUpdaterListenersOnce() {
@@ -177,23 +297,65 @@ export function registerUpdaterIpcOnce(): void {
     if (!app.isPackaged && process.env.ZENHOSP_UPDATER_TEST_DEV !== "1" && process.env.ZENHOSP_UPDATER_TEST_DEV !== "true") {
       return { ok: false, error: "Download skipped in development (unpackaged)." };
     }
-    if (!configureFeedIfNeeded()) {
-      return { ok: false, error: feedNotConfiguredMessage() };
+    if (configureFeedIfNeeded()) {
+      try {
+        await autoUpdater.downloadUpdate();
+        return { ok: true, method: "electron-updater" as const };
+      } catch {
+        /* fall through to GitHub Setup.exe */
+      }
     }
-    try {
-      await autoUpdater.downloadUpdate();
-      return { ok: true };
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      sendToRenderer({ type: "error", data: { message } });
-      return { ok: false, error: message };
-    }
+    return downloadGithubInstaller();
+  });
+
+  ipcMain.handle("updater:install-github-release", async () => {
+    return downloadGithubInstaller();
   });
 
   ipcMain.handle("updater:quit-and-install", () => {
+    if (pendingGithubInstaller?.path) {
+      return launchGithubInstallerThenQuit();
+    }
     setImmediate(() => {
-      autoUpdater.quitAndInstall(false, true);
+      try {
+        // Silent + relaunch so NSIS does not ask the user to close ZenHosp.
+        autoUpdater.quitAndInstall(true, true);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        sendToRenderer({ type: "error", data: { message } });
+      }
     });
-    return { ok: true };
+    return { ok: true, method: "electron-updater" as const };
   });
+}
+
+function launchGithubInstallerThenQuit(): {
+  ok: boolean;
+  error?: string;
+  method?: string;
+} {
+  const installerPath = pendingGithubInstaller?.path;
+  if (!installerPath || !existsSync(installerPath)) {
+    const msg = "The downloaded installer is missing. Download the update again.";
+    sendToRenderer({ type: "error", data: { message: msg } });
+    return { ok: false, error: msg };
+  }
+
+  const { file, args } = buildDelayedNsisInstallCommand(installerPath);
+  const child = spawn(file, args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+
+  // Exit immediately so Program Files unlocks before NSIS starts (~2s later).
+  setImmediate(() => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.removeAllListeners("close");
+      if (!win.isDestroyed()) win.close();
+    }
+    app.exit(0);
+  });
+  return { ok: true, method: "github-installer" };
 }

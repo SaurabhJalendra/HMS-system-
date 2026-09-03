@@ -9,12 +9,15 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("electronAPI", {
   setAppIcon: (dataUrl: string) => ipcRenderer.invoke("app:set-icon", dataUrl),
+  getApiUrl: () => ipcRenderer.invoke("api:get-url"),
+  setApiUrl: (url: string) => ipcRenderer.invoke("api:set-url", url),
 });
 
 contextBridge.exposeInMainWorld("zenhospUpdater", {
   getVersion: () => ipcRenderer.invoke("updater:get-version"),
   checkForUpdates: () => ipcRenderer.invoke("updater:check"),
   downloadUpdate: () => ipcRenderer.invoke("updater:download"),
+  installFromGitHub: () => ipcRenderer.invoke("updater:install-github-release"),
   quitAndInstall: () => ipcRenderer.invoke("updater:quit-and-install"),
   onUpdaterEvent: (handler: (payload: { type: string; data?: unknown }) => void) => {
     const listener = (_event: unknown, payload: { type: string; data?: unknown }) => {

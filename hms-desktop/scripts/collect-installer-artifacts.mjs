@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeUpdateArtifacts } from "./normalize-update-artifacts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
@@ -78,6 +79,12 @@ for (const name of sourceFiles) {
   const dest = path.join(outDir, name);
   fs.copyFileSync(src, dest);
   copied.push(name);
+}
+
+const normalized = normalizeUpdateArtifacts(outDir);
+if (normalized.renamed.length) {
+  console.log("Normalized names for electron-updater / GitHub:");
+  for (const line of normalized.renamed) console.log(`  ${line}`);
 }
 
 const manifest = {

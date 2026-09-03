@@ -4,8 +4,49 @@ import { PrismaClient, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { AuthRequest } from '../middleware/auth';
+import { roleStoresConsultationFee } from '../utils/hospitalHelper';
 
 const prisma = new PrismaClient();
+
+const USER_PUBLIC_SELECT = {
+  id: true,
+  username: true,
+  fullName: true,
+  role: true,
+  email: true,
+  phone: true,
+  consultationFee: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+const consultationFeeInput = z.union([z.number(), z.string(), z.null()]).optional();
+
+function parseConsultationFee(value: unknown): number | null | 'invalid' {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    return 'invalid';
+  }
+  return n;
+}
+
+function feeRequiredError() {
+  return {
+    success: false as const,
+    message: 'Consultation fee is required for doctors',
+  };
+}
+
+function feeInvalidError() {
+  return {
+    success: false as const,
+    message: 'Consultation fee must be a number greater than or equal to 0',
+  };
+}
 
 // Validation schemas
 const userCreateSchema = z.object({
@@ -16,6 +57,7 @@ const userCreateSchema = z.object({
   email: z.string().email('Invalid email').optional(),
   phone: z.string().min(10, 'Phone number too short').max(15, 'Phone number too long').optional(),
   department: z.string().max(100, 'Department name too long').optional(),
+  consultationFee: consultationFeeInput,
 });
 
 const userUpdateSchema = z.object({
@@ -26,6 +68,7 @@ const userUpdateSchema = z.object({
   phone: z.string().min(10, 'Phone number too short').max(15, 'Phone number too long').optional(),
   department: z.string().max(100, 'Department name too long').optional(),
   isActive: z.boolean().optional(),
+  consultationFee: consultationFeeInput,
 });
 
 const userSearchSchema = z.object({
@@ -57,6 +100,15 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const parsedFee = parseConsultationFee(validatedData.consultationFee);
+    if (parsedFee === 'invalid') {
+      return res.status(400).json(feeInvalidError());
+    }
+    if (validatedData.role === UserRole.DOCTOR && parsedFee === null) {
+      return res.status(400).json(feeRequiredError());
+    }
+    const consultationFee = roleStoresConsultationFee(validatedData.role) ? parsedFee : null;
+
     // Hash password
     const saltRounds = parseInt(process.env['BCRYPT_ROUNDS'] || '12');
     const passwordHash = await bcrypt.hash(validatedData.password, saltRounds);
@@ -70,6 +122,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         role: validatedData.role,
         email: validatedData.email || null,
         phone: validatedData.phone || null,
+        consultationFee,
         isActive: true,
       },
     });
@@ -84,6 +137,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         username: newUser.username,
         fullName: newUser.fullName,
         role: newUser.role,
+        consultationFee: newUser.consultationFee,
       },
     });
 
@@ -144,15 +198,7 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          username: true,
-          fullName: true,
-          role: true,
-          isActive: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+        select: USER_PUBLIC_SELECT,
       }),
       prisma.user.count({ where }),
     ]);
@@ -197,15 +243,7 @@ export const getUserById = async (req: AuthRequest, res: Response) => {
 
     const user = await prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true,
-        username: true,
-        fullName: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: USER_PUBLIC_SELECT,
     });
 
     if (!user) {
@@ -268,19 +306,47 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const effectiveRole = validatedData.role ?? existingUser.role;
+    const becomingDoctor =
+      validatedData.role === UserRole.DOCTOR && existingUser.role !== UserRole.DOCTOR;
+
+    let consultationFee: number | null | undefined = undefined;
+    if (validatedData.consultationFee !== undefined) {
+      const parsedFee = parseConsultationFee(validatedData.consultationFee);
+      if (parsedFee === 'invalid') {
+        return res.status(400).json(feeInvalidError());
+      }
+      consultationFee = roleStoresConsultationFee(effectiveRole) ? parsedFee : null;
+    } else if (validatedData.role && !roleStoresConsultationFee(effectiveRole)) {
+      consultationFee = null;
+    }
+
+    if (becomingDoctor && (consultationFee === undefined || consultationFee === null)) {
+      return res.status(400).json(feeRequiredError());
+    }
+
+    const updateData: {
+      username?: string;
+      fullName?: string;
+      role?: UserRole;
+      email?: string | null;
+      phone?: string | null;
+      isActive?: boolean;
+      consultationFee?: number | null;
+    } = {};
+    if (validatedData.username !== undefined) updateData.username = validatedData.username;
+    if (validatedData.fullName !== undefined) updateData.fullName = validatedData.fullName;
+    if (validatedData.role !== undefined) updateData.role = validatedData.role;
+    if (validatedData.email !== undefined) updateData.email = validatedData.email;
+    if (validatedData.phone !== undefined) updateData.phone = validatedData.phone;
+    if (validatedData.isActive !== undefined) updateData.isActive = validatedData.isActive;
+    if (consultationFee !== undefined) updateData.consultationFee = consultationFee;
+
     // Update user
     const updatedUser = await prisma.user.update({
       where: { id },
-      data: validatedData,
-      select: {
-        id: true,
-        username: true,
-        fullName: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      data: updateData,
+      select: USER_PUBLIC_SELECT,
     });
 
     // Log the action
@@ -294,12 +360,14 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
         fullName: existingUser.fullName,
         role: existingUser.role,
         isActive: existingUser.isActive,
+        consultationFee: existingUser.consultationFee,
       },
       newValue: {
         username: updatedUser.username,
         fullName: updatedUser.fullName,
         role: updatedUser.role,
         isActive: updatedUser.isActive,
+        consultationFee: updatedUser.consultationFee,
       },
     });
 
@@ -509,15 +577,7 @@ export const toggleUserStatus = async (req: AuthRequest, res: Response) => {
     const updatedUser = await prisma.user.update({
       where: { id },
       data: { isActive: !existingUser.isActive },
-      select: {
-        id: true,
-        username: true,
-        fullName: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: USER_PUBLIC_SELECT,
     });
 
     // Log the action

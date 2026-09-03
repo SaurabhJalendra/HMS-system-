@@ -145,15 +145,6 @@ const LoginForm = ({ onLogin, isLoading, logoUrl, hospitalName }) => {
           isLoading ? 'Signing in...' : 'Sign in'
         )
       )
-    ),
-    React.createElement(
-      'div',
-      { style: { marginTop: '12px', textAlign: 'center' } },
-      React.createElement(
-        'p',
-        { style: { fontSize: '11px', color: '#666666' } },
-        'Default credentials: mohit / admin123'
-      )
     )
   );
 };

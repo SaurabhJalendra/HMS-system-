@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { registerUpdaterIpcOnce, setUpdaterTargetWindow } from "./main/updater";
+import { registerApiUrlIpcOnce } from "./main/api-url-store";
 
 function resolveBundledAppIcon(): string | undefined {
   const packagedIco = path.join(process.resourcesPath, "icon.ico");
@@ -322,6 +323,7 @@ const registerGlobalShortcuts = () => {
 // This method will be called when Electron has finished initialization
 app.on("ready", () => {
   desktopLogger.info('Electron app ready');
+  registerApiUrlIpcOnce();
   
   // Set application name (used in title bar and system menus)
   app.setName('ZenHosp - Hospital Management System');

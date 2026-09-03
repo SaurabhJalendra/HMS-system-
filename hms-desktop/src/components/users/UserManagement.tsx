@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import userService from '../../lib/api/services/userService';
 import LoadingSpinner from '../common/LoadingSpinner';
-import { canManageUsers, getRoleDisplayInfo } from '../../lib/utils/rolePermissions';
+import { canManageUsers, getRoleDisplayInfo, roleUsesConsultationFee } from '../../lib/utils/rolePermissions';
 import { UserRole } from '../../lib/api/types';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
@@ -13,8 +13,57 @@ const getInitialUserFormData = () => ({
   role: 'RECEPTIONIST',
   email: '',
   phone: '',
-  department: ''
+  department: '',
+  consultationFee: ''
 });
+
+const getInitialEditFormData = () => ({
+  fullName: '',
+  role: 'RECEPTIONIST',
+  email: '',
+  phone: '',
+  consultationFee: ''
+});
+
+const feeInputStyle = {
+  width: '100%',
+  padding: '8px 12px',
+  border: '1px solid #D1D5DB',
+  borderRadius: '4px',
+  fontSize: '14px',
+  backgroundColor: '#FFFFFF'
+};
+
+const parseFeeForSubmit = (role, feeRaw) => {
+  if (!roleUsesConsultationFee(role)) {
+    return { ok: true, value: null };
+  }
+  if (role === UserRole.DOCTOR && (feeRaw === '' || feeRaw == null)) {
+    return { ok: false, error: 'Consultation fee is required for doctors' };
+  }
+  if (feeRaw === '' || feeRaw == null) {
+    return { ok: true, value: null };
+  }
+  const n = Number(feeRaw);
+  if (!Number.isFinite(n) || n < 0) {
+    return { ok: false, error: 'Consultation fee must be a number of 0 or more' };
+  }
+  return { ok: true, value: n };
+};
+
+const formatUserConsultationFee = (user) => {
+  if (!roleUsesConsultationFee(user.role)) {
+    return '—';
+  }
+  if (user.consultationFee == null || user.consultationFee === '') {
+    return 'Hospital default';
+  }
+  const n = Number(user.consultationFee);
+  if (!Number.isFinite(n)) {
+    return 'Hospital default';
+  }
+  return `₹${n.toFixed(2)}`;
+};
 
 const UserManagement = ({ user: currentUser, isAuthenticated }) => {
   const [users, setUsers] = useState([]);
@@ -29,6 +78,8 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
   const [filterStatus, setFilterStatus] = useState('');
   const [stats, setStats] = useState(null);
   const [formData, setFormData] = useState(getInitialUserFormData);
+  const [editingUser, setEditingUser] = useState(null);
+  const [editFormData, setEditFormData] = useState(getInitialEditFormData);
   const [passwordResetData, setPasswordResetData] = useState({
     newPassword: '',
     confirmPassword: ''
@@ -104,6 +155,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
   const handleToggleAddForm = () => {
     setError('');
     setSuccessMessage('');
+    setEditingUser(null);
     setFormData(getInitialUserFormData());
     setShowAddForm(prev => !prev);
   };
@@ -111,6 +163,14 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleEditInputChange = (e) => {
+    const { name, value } = e.target;
+    setEditFormData(prev => ({
       ...prev,
       [name]: value
     }));
@@ -132,6 +192,13 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
       setError('');
       setSuccessMessage('');
       
+      const feeResult = parseFeeForSubmit(formData.role, formData.consultationFee);
+      if (!feeResult.ok) {
+        setError(feeResult.error);
+        setActionLoading(null);
+        return;
+      }
+
       const userData = {
         username: formData.username,
         password: formData.password,
@@ -139,7 +206,8 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
         role: formData.role,
         ...(formData.email && { email: formData.email }),
         ...(formData.phone && { phone: formData.phone }),
-        ...(formData.department && { department: formData.department })
+        ...(formData.department && { department: formData.department }),
+        ...(roleUsesConsultationFee(formData.role) ? { consultationFee: feeResult.value } : {})
       };
 
       const response = await userService.createUser(userData);
@@ -154,6 +222,67 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
     } catch (err) {
       console.error('Create user error:', err);
       setError('Error creating user: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleStartEdit = (targetUser) => {
+    setError('');
+    setSuccessMessage('');
+    setShowAddForm(false);
+    setEditingUser(targetUser);
+    setEditFormData({
+      fullName: targetUser.fullName || '',
+      role: targetUser.role || 'RECEPTIONIST',
+      email: targetUser.email || '',
+      phone: targetUser.phone || '',
+      consultationFee:
+        targetUser.consultationFee != null && targetUser.consultationFee !== ''
+          ? String(targetUser.consultationFee)
+          : ''
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingUser(null);
+    setEditFormData(getInitialEditFormData());
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingUser) {
+      return;
+    }
+
+    try {
+      setActionLoading('edit');
+      setError('');
+      setSuccessMessage('');
+
+      const feeResult = parseFeeForSubmit(editFormData.role, editFormData.consultationFee);
+      if (!feeResult.ok) {
+        setError(feeResult.error);
+        setActionLoading(null);
+        return;
+      }
+
+      await userService.updateUser(editingUser.id, {
+        fullName: editFormData.fullName,
+        role: editFormData.role,
+        email: editFormData.email || undefined,
+        phone: editFormData.phone || undefined,
+        consultationFee: roleUsesConsultationFee(editFormData.role) ? feeResult.value : null
+      });
+
+      setEditingUser(null);
+      setEditFormData(getInitialEditFormData());
+      await Promise.all([loadUsers(), loadStats()]);
+      setSuccessMessage('User updated successfully');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err) {
+      console.error('Update user error:', err);
+      setError('Error updating user: ' + (err.response?.data?.message || err.message));
     } finally {
       setActionLoading(null);
     }
@@ -496,6 +625,26 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
               ))
             )
           ),
+          roleUsesConsultationFee(formData.role) && React.createElement(
+            'div',
+            null,
+            React.createElement(
+              'label',
+              { style: { display: 'block', fontSize: '14px', fontWeight: '500', color: '#111827', marginBottom: '4px' } },
+              formData.role === UserRole.DOCTOR ? 'Consultation Fee *' : 'Consultation Fee'
+            ),
+            React.createElement('input', {
+              type: 'number',
+              name: 'consultationFee',
+              min: '0',
+              step: '0.01',
+              required: formData.role === UserRole.DOCTOR,
+              value: formData.consultationFee,
+              onChange: handleInputChange,
+              placeholder: 'e.g. 500',
+              style: feeInputStyle
+            })
+          ),
           React.createElement(
             'div',
             null,
@@ -673,6 +822,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
               null,
               React.createElement('th', { style: { padding: '12px', textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontWeight: '600', fontSize: '14px', color: '#111827' } }, 'User'),
               React.createElement('th', { style: { padding: '12px', textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontWeight: '600', fontSize: '14px', color: '#111827' } }, 'Role'),
+              React.createElement('th', { style: { padding: '12px', textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontWeight: '600', fontSize: '14px', color: '#111827' } }, 'Consult. Fee'),
               React.createElement('th', { style: { padding: '12px', textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontWeight: '600', fontSize: '14px', color: '#111827' } }, 'Status'),
               React.createElement('th', { style: { padding: '12px', textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontWeight: '600', fontSize: '14px', color: '#111827' } }, 'Created'),
               React.createElement('th', { style: { padding: '12px', textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontWeight: '600', fontSize: '14px', color: '#111827' } }, 'Actions')
@@ -686,7 +836,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
               null,
               React.createElement(
                 'td',
-                { colSpan: 5, style: { padding: '40px', textAlign: 'center', color: '#6B7280', fontSize: '14px' } },
+                { colSpan: 6, style: { padding: '40px', textAlign: 'center', color: '#6B7280', fontSize: '14px' } },
                 initialLoading ? 'Loading...' : 'No users found. Click "Add User" to create your first user.'
               )
             ) : users.map((user, index) => {
@@ -723,6 +873,11 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                 ),
                 React.createElement(
                   'td',
+                  { style: { padding: '12px', fontSize: '14px', color: '#111827' } },
+                  formatUserConsultationFee(user)
+                ),
+                React.createElement(
+                  'td',
                   { style: { padding: '12px' } },
                   React.createElement(
                     'span',
@@ -741,6 +896,23 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                   React.createElement(
                     'div',
                     { style: { display: 'flex', gap: '8px' } },
+                    canManageUsers(currentUser?.role) && React.createElement(
+                      'button',
+                      {
+                        onClick: () => handleStartEdit(user),
+                        style: {
+                          backgroundColor: '#0F766E',
+                          color: '#FFFFFF',
+                          border: 'none',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: '500'
+                        }
+                      },
+                      'Edit'
+                    ),
                     canResetPassword(user.id) && React.createElement(
                       'button',
                       {
@@ -796,6 +968,124 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                 )
               );
             })
+          )
+        )
+      )
+    ),
+
+    // Edit User Modal
+    editingUser && React.createElement(
+      'div',
+      { className: 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50' },
+      React.createElement(
+        'div',
+        { className: 'relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white' },
+        React.createElement(
+          'h3',
+          { className: 'text-lg font-bold text-gray-900 mb-4' },
+          `Edit User — ${editingUser.fullName || editingUser.username}`
+        ),
+        React.createElement(
+          'form',
+          { onSubmit: handleEditSubmit, className: 'space-y-4' },
+          React.createElement(
+            'div',
+            null,
+            React.createElement('label', { className: 'block text-sm font-medium text-gray-700' }, 'Full Name *'),
+            React.createElement('input', {
+              type: 'text',
+              name: 'fullName',
+              required: true,
+              value: editFormData.fullName,
+              onChange: handleEditInputChange,
+              className: 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+            })
+          ),
+          React.createElement(
+            'div',
+            null,
+            React.createElement('label', { className: 'block text-sm font-medium text-gray-700' }, 'Role *'),
+            React.createElement(
+              'select',
+              {
+                name: 'role',
+                required: true,
+                value: editFormData.role,
+                onChange: handleEditInputChange,
+                className: 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+              },
+              roles.map(role => React.createElement(
+                'option',
+                { key: role.value, value: role.value },
+                `${role.icon} ${role.label}`
+              ))
+            )
+          ),
+          roleUsesConsultationFee(editFormData.role) && React.createElement(
+            'div',
+            null,
+            React.createElement(
+              'label',
+              { className: 'block text-sm font-medium text-gray-700' },
+              editFormData.role === UserRole.DOCTOR ? 'Consultation Fee *' : 'Consultation Fee'
+            ),
+            React.createElement('input', {
+              type: 'number',
+              name: 'consultationFee',
+              min: '0',
+              step: '0.01',
+              required: editFormData.role === UserRole.DOCTOR,
+              value: editFormData.consultationFee,
+              onChange: handleEditInputChange,
+              placeholder: 'e.g. 500',
+              className: 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+            })
+          ),
+          React.createElement(
+            'div',
+            null,
+            React.createElement('label', { className: 'block text-sm font-medium text-gray-700' }, 'Email'),
+            React.createElement('input', {
+              type: 'email',
+              name: 'email',
+              value: editFormData.email,
+              onChange: handleEditInputChange,
+              className: 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+            })
+          ),
+          React.createElement(
+            'div',
+            null,
+            React.createElement('label', { className: 'block text-sm font-medium text-gray-700' }, 'Phone'),
+            React.createElement('input', {
+              type: 'tel',
+              name: 'phone',
+              value: editFormData.phone,
+              onChange: handleEditInputChange,
+              className: 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+            })
+          ),
+          React.createElement(
+            'div',
+            { className: 'flex space-x-2' },
+            React.createElement(
+              'button',
+              {
+                type: 'submit',
+                disabled: actionLoading === 'edit',
+                className: 'flex-1 bg-teal-700 text-white py-2 px-4 rounded-md hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-500'
+              },
+              actionLoading === 'edit' ? 'Saving...' : 'Save'
+            ),
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                onClick: handleCancelEdit,
+                className: 'flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500'
+              },
+              'Cancel'
+            )
           )
         )
       )

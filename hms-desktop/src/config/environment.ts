@@ -1,8 +1,17 @@
+const viteApiUrl = String(import.meta.env.VITE_API_URL || "").trim();
+const packagedDefaultApiUrl = "http://13.235.103.44:3000/api";
+const initialApiUrl =
+  viteApiUrl && !(import.meta.env.PROD && /localhost|127\.0\.0\.1/i.test(viteApiUrl))
+    ? viteApiUrl
+    : import.meta.env.DEV
+      ? viteApiUrl || "http://localhost:3000/api"
+      : packagedDefaultApiUrl;
+
 // Environment configuration
 export const config = {
-  // API Configuration
-  // Base URL must end with /api (Express mounts REST under /api/...). Override with VITE_API_URL at build time.
-  API_URL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api',
+  // Packaged builds default to the clinic server. Runtime value is persisted
+  // in Electron userData (see runtimeApiUrl.ts) so updates do not reset localhost.
+  API_URL: initialApiUrl,
   
   // Application Configuration
   APP_NAME: import.meta.env.VITE_APP_NAME || 'HMS Desktop',

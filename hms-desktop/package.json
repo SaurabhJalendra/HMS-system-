@@ -1,7 +1,7 @@
 {
   "name": "hms-desktop",
   "productName": "ZenHosp - Hospital Management System",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "description": "My Electron application description",
   "main": ".vite/build/main.js",
   "scripts": {
