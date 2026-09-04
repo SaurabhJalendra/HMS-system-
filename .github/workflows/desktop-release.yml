@@ -95,8 +95,8 @@ jobs:
             hms-desktop/release/installer-artifacts/*
           generate_release_notes: true
 
-      - name: Publish to S3
-        if: secrets.ZENHOSP_UPDATE_S3_BUCKET != '' && (github.event_name == 'push' || github.event.inputs.publish_s3 == 'true')
+      - name: Publish to S3 (optional)
+        if: github.event_name == 'push' || github.event.inputs.publish_s3 == 'true'
         working-directory: hms-desktop
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
