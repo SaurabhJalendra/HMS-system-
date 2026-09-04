@@ -26,8 +26,8 @@ const region = process.env.AWS_REGION || "ap-south-1";
 const usePublicAcl = process.env.ZENHOSP_UPDATE_S3_ACL === "public-read";
 
 if (!bucket) {
-  console.error("Set ZENHOSP_UPDATE_S3_BUCKET to publish.");
-  process.exit(1);
+  console.log("ZENHOSP_UPDATE_S3_BUCKET not set — skipping S3 upload.");
+  process.exit(0);
 }
 
 if (!fs.existsSync(artifactsDir)) {
