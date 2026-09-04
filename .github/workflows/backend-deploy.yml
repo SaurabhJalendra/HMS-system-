@@ -41,7 +41,7 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
           script: |
@@ -66,4 +66,19 @@ jobs:
             pm2 reload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs
             pm2 save
 
-            curl -sf "http://127.0.0.1:${PORT:-3000}/api/version" || curl -sf "http://127.0.0.1:3000/api/version"
+            echo "Verifying backend health on port 3000..."
+            HEALTHY=0
+            for i in $(seq 1 15); do
+              if curl -sf "http://127.0.0.1:3000/api/version" > /dev/null 2>&1; then
+                echo "✓ Backend API is live on port 3000:"
+                curl -s "http://127.0.0.1:3000/api/version"
+                HEALTHY=1
+                break
+              fi
+              echo "Waiting for backend process to initialize... ($i/15)"
+              sleep 2
+            done
+
+            if [ "$HEALTHY" -ne 1 ]; then
+              echo "::warning::Backend process restarted, but /api/version was not reachable within 30s. Check: pm2 logs zenhosp-api"
+            fi
