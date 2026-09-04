@@ -19,7 +19,6 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Checkout
@@ -29,11 +28,17 @@ jobs:
         run: node hms-desktop/scripts/sync-release-version.mjs
         working-directory: .
 
+      - name: Validate EC2 Secrets
+        if: secrets.EC2_HOST == '' || secrets.EC2_SSH_KEY == ''
+        run: |
+          echo "::notice title=Automatic EC2 Deploy Skipped::EC2 secrets (EC2_HOST, EC2_SSH_KEY) are not set in GitHub repository secrets. To enable automatic backend deployment on push to main, add EC2_HOST, EC2_USER, and EC2_SSH_KEY in Repository Settings -> Secrets and variables -> Actions."
+
       - name: Deploy over SSH
+        if: secrets.EC2_HOST != '' && secrets.EC2_SSH_KEY != ''
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
           script: |

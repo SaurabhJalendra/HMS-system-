@@ -310,6 +310,9 @@ async function main() {
   const tagName = `v${targetVersion}`;
   console.log(`\n🏷️  Managing Git Tag: ${tagName}...`);
 
+  // Delete GitHub release if exists (e.g. stale or draft release)
+  run(`gh release delete ${tagName} -y`, { silent: true, ignoreError: true });
+
   // Delete local tag if exists
   run(`git tag -d ${tagName}`, { silent: true, ignoreError: true });
 
