@@ -7,10 +7,11 @@ import type { CreatePatientRequest } from '../../lib/api/types';
 import { Gender } from '../../lib/api/types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
+import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly } from '../../lib/constants/patientFields';
 
 export type PatientRegistrationFormData = {
   name: string;
-  dateOfBirth: string;
+  age: string;
   gender: Gender;
   phone: string;
   nationality: 'IN' | 'FOREIGN';
@@ -18,6 +19,7 @@ export type PatientRegistrationFormData = {
   passportNumber: string;
   address: string;
   bloodGroup: string;
+  bloodGroupOther: string;
   allergies: string;
   chronicConditions: string;
   emergencyContactName: string;
@@ -27,7 +29,7 @@ export type PatientRegistrationFormData = {
 
 export const getInitialPatientRegistrationFormData = (): PatientRegistrationFormData => ({
   name: '',
-  dateOfBirth: '',
+  age: '',
   gender: Gender.MALE,
   phone: '',
   nationality: 'IN',
@@ -35,6 +37,7 @@ export const getInitialPatientRegistrationFormData = (): PatientRegistrationForm
   passportNumber: '',
   address: '',
   bloodGroup: '',
+  bloodGroupOther: '',
   allergies: '',
   chronicConditions: '',
   emergencyContactName: '',
@@ -93,7 +96,13 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
       const { name, value } = e.target;
-      setFormData((prev) => ({ ...prev, [name]: value }));
+      let next = value;
+      if (name === 'phone' || name === 'emergencyContactPhone') {
+        next = digitsOnly(value, 10);
+      } else if (name === 'age') {
+        next = digitsOnly(value, 3);
+      }
+      setFormData((prev) => ({ ...prev, [name]: next }));
     },
     []
   );
@@ -152,9 +161,38 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
     setError('');
     setIsSubmitting(true);
     try {
-      const { nationality, ...rest } = formData;
-      void nationality;
-      const patientData: CreatePatientRequest = { ...rest };
+      const ageNumber = parseInt(formData.age, 10);
+      if (!formData.age || Number.isNaN(ageNumber) || ageNumber < 0 || ageNumber > 150) {
+        setError('Please enter a valid age between 0 and 150');
+        setIsSubmitting(false);
+        return;
+      }
+      if (!/^[0-9]{10}$/.test(formData.phone)) {
+        setError('Phone number must be exactly 10 digits');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const bloodGroup =
+        formData.bloodGroup === 'Other'
+          ? (formData.bloodGroupOther.trim() || 'Other')
+          : formData.bloodGroup || undefined;
+
+      const patientData: CreatePatientRequest = {
+        name: formData.name,
+        age: ageNumber,
+        gender: formData.gender,
+        phone: formData.phone,
+        aadharCardNumber: formData.aadharCardNumber,
+        passportNumber: formData.passportNumber,
+        address: formData.address,
+        bloodGroup,
+        allergies: formData.allergies,
+        chronicConditions: formData.chronicConditions,
+        emergencyContactName: formData.emergencyContactName,
+        emergencyContactPhone: formData.emergencyContactPhone,
+        referredBy: formData.referredBy,
+      };
 
       const created = await patientService.createPatient(patientData);
 
@@ -220,14 +258,16 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700">Date of Birth *</label>
+        <label className="block text-sm font-medium text-gray-700">Age *</label>
         <input
-          type="date"
-          name="dateOfBirth"
+          type="text"
+          inputMode="numeric"
+          name="age"
           required
-          max={new Date().toISOString().split('T')[0]}
-          value={formData.dateOfBirth}
+          value={formData.age}
           onChange={handleInputChange}
+          placeholder="Age in years"
+          maxLength={3}
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
@@ -253,10 +293,16 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
           type="tel"
           name="phone"
           required
+          inputMode="numeric"
           value={formData.phone}
           onChange={handleInputChange}
+          placeholder="10-digit mobile number"
+          maxLength={10}
+          pattern="[0-9]{10}"
+          title="Phone number must be exactly 10 digits"
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        <p className="mt-1 text-xs text-gray-500">Exactly 10 digits. Letters and symbols are not allowed.</p>
       </div>
 
       <div>
@@ -320,14 +366,37 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
 
       <div>
         <label className="block text-sm font-medium text-gray-700">Blood Group</label>
-        <input
-          type="text"
+        <select
           name="bloodGroup"
-          value={formData.bloodGroup}
-          onChange={handleInputChange}
-          placeholder="e.g., O+, A-, B+"
+          value={bloodGroupSelectValue(formData.bloodGroup)}
+          onChange={(e) => {
+            const value = e.target.value;
+            setFormData((prev) => ({
+              ...prev,
+              bloodGroup: value,
+              bloodGroupOther: value === 'Other' ? prev.bloodGroupOther : '',
+            }));
+          }}
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+        >
+          <option value="">Select blood group</option>
+          {BLOOD_GROUP_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {option === 'N.A' ? 'N.A (not known)' : option === 'Other' ? 'Other (rare)' : option}
+            </option>
+          ))}
+        </select>
+        {formData.bloodGroup === 'Other' ? (
+          <input
+            type="text"
+            name="bloodGroupOther"
+            value={formData.bloodGroupOther}
+            onChange={handleInputChange}
+            placeholder="Enter rare blood group"
+            maxLength={20}
+            className="mt-2 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        ) : null}
       </div>
 
       <div className="md:col-span-2">
@@ -461,7 +530,9 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
           name="emergencyContactPhone"
           value={formData.emergencyContactPhone}
           onChange={handleInputChange}
-          placeholder="Emergency contact phone"
+          placeholder="10-digit emergency contact phone"
+          maxLength={10}
+          inputMode="numeric"
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>

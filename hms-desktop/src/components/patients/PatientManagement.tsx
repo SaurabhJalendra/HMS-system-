@@ -5,6 +5,7 @@ import catalogService from '../../lib/api/services/catalogService';
 import LoadingSpinner from '../common/LoadingSpinner';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
+import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly } from '../../lib/constants/patientFields';
 const PatientManagement = () => {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +37,7 @@ const PatientManagement = () => {
   
   const [formData, setFormData] = useState({
     name: '',
-    dateOfBirth: '',
+    age: '',
     gender: 'MALE',
     phone: '',
     nationality: 'IN', // 'IN' = Indian (Aadhar), 'FOREIGN' = Passport
@@ -44,6 +45,7 @@ const PatientManagement = () => {
     passportNumber: '',
     address: '',
     bloodGroup: '',
+    bloodGroupOther: '',
     allergies: '',
     chronicConditions: '',
     emergencyContactName: '',
@@ -124,9 +126,15 @@ const PatientManagement = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    let next = value;
+    if (name === 'phone' || name === 'emergencyContactPhone') {
+      next = digitsOnly(value, 10);
+    } else if (name === 'age') {
+      next = digitsOnly(value, 3);
+    }
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: next
     }));
   };
 
@@ -139,8 +147,26 @@ const PatientManagement = () => {
       setSuccess('');
       
       // Send patient data (omit nationality - UI only; backend stores aadharCardNumber and passportNumber)
-      const { nationality, ...rest } = formData;
-      const patientData = { ...rest };
+      const { nationality, bloodGroupOther, ...rest } = formData;
+      const ageNumber = parseInt(formData.age, 10);
+      if (!formData.age || Number.isNaN(ageNumber) || ageNumber < 0 || ageNumber > 150) {
+        setError('Please enter a valid age between 0 and 150');
+        setIsSubmitting(false);
+        return;
+      }
+      if (!/^[0-9]{10}$/.test(formData.phone)) {
+        setError('Phone number must be exactly 10 digits');
+        setIsSubmitting(false);
+        return;
+      }
+      const patientData = {
+        ...rest,
+        age: ageNumber,
+        bloodGroup:
+          rest.bloodGroup === 'Other'
+            ? (bloodGroupOther.trim() || 'Other')
+            : rest.bloodGroup,
+      };
 
       if (!selectedPatient) {
         setError('No patient selected for update.');
@@ -196,7 +222,7 @@ const PatientManagement = () => {
       // Reset form
       setFormData({
         name: '',
-        dateOfBirth: '',
+        age: '',
         gender: 'MALE',
         phone: '',
         nationality: 'IN',
@@ -204,6 +230,7 @@ const PatientManagement = () => {
         passportNumber: '',
         address: '',
         bloodGroup: '',
+        bloodGroupOther: '',
         allergies: '',
         chronicConditions: '',
         emergencyContactName: '',
@@ -273,20 +300,23 @@ const PatientManagement = () => {
       setSelectedAllergies(existingAllergyIds);
       
       setSelectedPatient(patientData);
+      const storedPhone = digitsOnly(patientData.phone || '', 15);
+      const selectedBloodGroup = bloodGroupSelectValue(patientData.bloodGroup);
       setFormData({
         name: patientData.name || '',
-        dateOfBirth: patientData.dateOfBirth ? new Date(patientData.dateOfBirth).toISOString().split('T')[0] : '',
+        age: patientData.age != null ? String(patientData.age) : '',
         gender: patientData.gender || 'MALE',
-        phone: patientData.phone || '',
+        phone: storedPhone.length > 10 ? storedPhone.slice(-10) : storedPhone,
         nationality: patientData.passportNumber ? 'FOREIGN' : 'IN',
         aadharCardNumber: patientData.aadharCardNumber || '',
         passportNumber: patientData.passportNumber || '',
         address: patientData.address || '',
-        bloodGroup: patientData.bloodGroup || '',
+        bloodGroup: selectedBloodGroup,
+        bloodGroupOther: selectedBloodGroup === 'Other' ? (patientData.bloodGroup || '') : '',
         allergies: patientData.allergies || '',
         chronicConditions: patientData.chronicConditions || '',
         emergencyContactName: patientData.emergencyContactName || '',
-        emergencyContactPhone: patientData.emergencyContactPhone || '',
+        emergencyContactPhone: digitsOnly(patientData.emergencyContactPhone || '', 10),
         referredBy: patientData.referredBy || ''
       });
       setShowEditModal(true);
@@ -375,7 +405,7 @@ const PatientManagement = () => {
     setAllergySearchTerm('');
     setFormData({
       name: '',
-      dateOfBirth: '',
+      age: '',
       gender: 'MALE',
       phone: '',
       nationality: 'IN',
@@ -383,6 +413,7 @@ const PatientManagement = () => {
       passportNumber: '',
       address: '',
       bloodGroup: '',
+      bloodGroupOther: '',
       allergies: '',
       chronicConditions: '',
       emergencyContactName: '',
@@ -907,13 +938,14 @@ const PatientManagement = () => {
               className: 'px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
             }),
             React.createElement('input', {
-              type: 'date',
-              name: 'dateOfBirth',
+              type: 'text',
+              inputMode: 'numeric',
+              name: 'age',
               required: true,
-              max: new Date().toISOString().split('T')[0],
-              value: formData.dateOfBirth,
+              value: formData.age,
               onChange: handleInputChange,
-              placeholder: 'Date of Birth *',
+              placeholder: 'Age *',
+              maxLength: 3,
               className: 'px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
             }),
             React.createElement(
@@ -933,9 +965,13 @@ const PatientManagement = () => {
               type: 'tel',
               name: 'phone',
               required: true,
+              inputMode: 'numeric',
               value: formData.phone,
               onChange: handleInputChange,
-              placeholder: 'Phone *',
+              placeholder: 'Phone * (10 digits)',
+              maxLength: 10,
+              pattern: '[0-9]{10}',
+              title: 'Phone number must be exactly 10 digits',
               className: 'px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
             }),
             React.createElement(
@@ -985,14 +1021,45 @@ const PatientManagement = () => {
                 className: 'px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
               }
             ),
-            React.createElement('input', {
-              type: 'text',
-              name: 'bloodGroup',
-              value: formData.bloodGroup,
-              onChange: handleInputChange,
-              placeholder: 'Blood Group (e.g., O+, A-)',
-              className: 'px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
-            }),
+            React.createElement(
+              'div',
+              null,
+              React.createElement(
+                'select',
+                {
+                  name: 'bloodGroup',
+                  value: bloodGroupSelectValue(formData.bloodGroup),
+                  onChange: (e) => {
+                    const value = e.target.value;
+                    setFormData((prev) => ({
+                      ...prev,
+                      bloodGroup: value,
+                      bloodGroupOther: value === 'Other' ? prev.bloodGroupOther : '',
+                    }));
+                  },
+                  className: 'px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                },
+                React.createElement('option', { value: '' }, 'Select blood group'),
+                BLOOD_GROUP_OPTIONS.map((option) =>
+                  React.createElement(
+                    'option',
+                    { key: option, value: option },
+                    option === 'N.A' ? 'N.A (not known)' : option === 'Other' ? 'Other (rare)' : option
+                  )
+                )
+              ),
+              formData.bloodGroup === 'Other'
+                ? React.createElement('input', {
+                    type: 'text',
+                    name: 'bloodGroupOther',
+                    value: formData.bloodGroupOther,
+                    onChange: handleInputChange,
+                    placeholder: 'Enter rare blood group',
+                    maxLength: 20,
+                    className: 'mt-2 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                  })
+                : null
+            ),
             React.createElement(
               'div',
               { style: { gridColumn: '1 / -1' } },
@@ -1210,9 +1277,11 @@ const PatientManagement = () => {
             React.createElement('input', {
               type: 'tel',
               name: 'emergencyContactPhone',
+              inputMode: 'numeric',
               value: formData.emergencyContactPhone,
               onChange: handleInputChange,
-              placeholder: 'Emergency Contact Phone',
+              placeholder: 'Emergency Contact Phone (10 digits)',
+              maxLength: 10,
               className: 'px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
             }),
             React.createElement(
