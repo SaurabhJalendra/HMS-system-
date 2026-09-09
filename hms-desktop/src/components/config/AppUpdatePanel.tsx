@@ -99,6 +99,9 @@ const AppUpdatePanel: React.FC = () => {
   const [phase, setPhase] = useState<UiPhase>("idle");
   const [installedVersion, setInstalledVersion] = useState<string>("");
   const [isPackaged, setIsPackaged] = useState<boolean>(false);
+  const [localSetupVersion, setLocalSetupVersion] = useState<string>("");
+  const [localDesktopRoot, setLocalDesktopRoot] = useState<string>("");
+  const [localSyncBusy, setLocalSyncBusy] = useState(false);
   const [remoteVersion, setRemoteVersion] = useState<string>("");
   const [message, setMessage] = useState<string>("");
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
@@ -161,6 +164,8 @@ const AppUpdatePanel: React.FC = () => {
     const v = await updater.getVersion();
     setInstalledVersion(v.version);
     setIsPackaged(v.isPackaged);
+    setLocalSetupVersion(v.localSetupVersion || "");
+    setLocalDesktopRoot(v.localDesktopRoot || "");
     return v;
   }, [updater]);
 
@@ -215,7 +220,17 @@ const AppUpdatePanel: React.FC = () => {
         }
         case "update-not-available":
           applyNotAvailableState();
+          void refreshInstalledVersion();
           break;
+        case "local-installer-synced": {
+          const synced = evt.data as { version?: string };
+          setLocalSetupVersion(synced?.version || "");
+          setMessage(
+            `Project Setup.exe is now v${synced?.version || "latest"}. The installed app and the installer file now match.`
+          );
+          void refreshInstalledVersion();
+          break;
+        }
         case "download-progress":
           setPhase("downloading");
           setDownloadPercent(
@@ -400,6 +415,26 @@ const AppUpdatePanel: React.FC = () => {
     await updater.quitAndInstall();
   }, [updater, isSafeToRestartForUpdate]);
 
+  const handleSyncLocalInstaller = useCallback(async () => {
+    if (!updater?.syncLocalInstaller) return;
+    setLocalSyncBusy(true);
+    setMessage("Updating the project Setup.exe from GitHub…");
+    const result = await updater.syncLocalInstaller();
+    setLocalSyncBusy(false);
+    if (!result.ok) {
+      setPhase("error");
+      setMessage(result.error || "Could not update the project Setup.exe.");
+      return;
+    }
+    if (result.skipped) {
+      setMessage(result.reason || `Project Setup.exe is already v${result.version}.`);
+    } else {
+      setLocalSetupVersion(result.version || "");
+      setMessage(`Project Setup.exe is now v${result.version}.`);
+    }
+    await refreshInstalledVersion();
+  }, [updater, refreshInstalledVersion]);
+
   if (!isZenHospUpdaterAvailable()) {
     return (
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
@@ -442,6 +477,19 @@ const AppUpdatePanel: React.FC = () => {
           {advertisedLatest ? (
             <div>
               <span className="text-gray-600">Latest ({latestSource}):</span> v{advertisedLatest}
+            </div>
+          ) : null}
+          {localDesktopRoot ? (
+            <div className="mt-2 pt-2 border-t border-gray-200">
+              <div>
+                <span className="text-gray-600">Project Setup.exe:</span>{" "}
+                {localSetupVersion ? `v${localSetupVersion}` : "not found"}
+                {localSetupVersion && installedVersion && localSetupVersion !== installedVersion ? (
+                  <span className="ml-2 text-amber-800 text-xs font-medium">
+                    does not match the installed app
+                  </span>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </div>
@@ -573,6 +621,16 @@ const AppUpdatePanel: React.FC = () => {
         >
           {phase === "checking" ? "Checking…" : "Check for updates"}
         </button>
+        {localDesktopRoot && updater?.syncLocalInstaller ? (
+          <button
+            type="button"
+            onClick={handleSyncLocalInstaller}
+            disabled={localSyncBusy || phase === "downloading"}
+            className="px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-md hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {localSyncBusy ? "Updating Setup.exe…" : "Update project Setup.exe"}
+          </button>
+        ) : null}
       </div>
 
       <p className="mt-4 text-xs text-gray-500">

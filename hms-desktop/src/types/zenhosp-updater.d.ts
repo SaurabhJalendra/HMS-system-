@@ -11,6 +11,8 @@ export type ZenHospUpdaterAPI = {
     githubOwner?: string;
     githubRepo?: string;
     feedUrl?: string;
+    localDesktopRoot?: string;
+    localSetupVersion?: string;
   }>;
   checkForUpdates: () => Promise<{
     ok: boolean;
@@ -29,6 +31,14 @@ export type ZenHospUpdaterAPI = {
     error?: string;
     method?: string;
     version?: string;
+  }>;
+  syncLocalInstaller?: () => Promise<{
+    ok: boolean;
+    skipped?: boolean;
+    version?: string;
+    reason?: string;
+    error?: string;
+    copied?: string[];
   }>;
   quitAndInstall: () => Promise<{ ok: boolean }>;
   onUpdaterEvent: (handler: (payload: UpdaterEventPayload) => void) => () => void;
