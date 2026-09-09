@@ -4,7 +4,7 @@
   "minimumDesktopVersion": "1.0.0",
   "latestDesktopVersion": "1.0.9",
   "releaseNotes": [
-    "Sync project Setup.exe when installing from Settings"
+    "Keep desktop and backend version files at 1.0.9"
   ],
-  "publishedAt": "2026-09-09T06:14:06.651Z"
+  "publishedAt": "2026-09-09T06:35:52.510Z"
 }
