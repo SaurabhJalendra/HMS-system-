@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("zenhospUpdater", {
   checkForUpdates: () => ipcRenderer.invoke("updater:check"),
   downloadUpdate: () => ipcRenderer.invoke("updater:download"),
   installFromGitHub: () => ipcRenderer.invoke("updater:install-github-release"),
+  syncLocalInstaller: () => ipcRenderer.invoke("updater:sync-local-installer"),
   quitAndInstall: () => ipcRenderer.invoke("updater:quit-and-install"),
   onUpdaterEvent: (handler: (payload: { type: string; data?: unknown }) => void) => {
     const listener = (_event: unknown, payload: { type: string; data?: unknown }) => {

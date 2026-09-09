@@ -1,10 +1,10 @@
 {
-  "version": "1.0.8",
-  "backendVersion": "1.0.8",
+  "version": "1.0.9",
+  "backendVersion": "1.0.9",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.8",
+  "latestDesktopVersion": "1.0.9",
   "releaseNotes": [
-    "Fix silent desktop update and restart"
+    "Sync project Setup.exe when installing from Settings"
   ],
-  "publishedAt": "2026-09-09T05:09:50.820Z"
+  "publishedAt": "2026-09-09T06:14:06.651Z"
 }

@@ -11,6 +11,11 @@ import {
 } from "./nsisUpdateLaunch";
 import bundledUpdateConfig from "./update-config.json";
 import { resolveStoredApiUrl } from "./api-url-store";
+import {
+  readLocalSetupVersion,
+  resolveDesktopProjectRoot,
+  syncLatestInstallerToCodebase,
+} from "./localInstallerSync";
 
 type UpdateProvider = "github" | "generic";
 
@@ -173,6 +178,32 @@ async function mergeFeedFromBackend(): Promise<void> {
   }
 }
 
+function githubOwner(): string {
+  return updateConfig?.owner?.trim() || process.env.ZENHOSP_GITHUB_OWNER?.trim() || "";
+}
+
+function githubRepo(): string {
+  return updateConfig?.repo?.trim() || process.env.ZENHOSP_GITHUB_REPO?.trim() || "";
+}
+
+async function syncLocalInstallerQuiet(options?: {
+  sourceExePath?: string;
+  versionHint?: string;
+  force?: boolean;
+}) {
+  const result = await syncLatestInstallerToCodebase({
+    owner: githubOwner(),
+    repo: githubRepo(),
+    sourceExePath: options?.sourceExePath,
+    versionHint: options?.versionHint,
+    force: options?.force,
+  });
+  if (result.ok && !result.skipped) {
+    sendToRenderer({ type: "local-installer-synced", data: result });
+  }
+  return result;
+}
+
 async function downloadGithubInstaller(): Promise<{
   ok: boolean;
   error?: string;
@@ -203,9 +234,14 @@ async function downloadGithubInstaller(): Promise<{
       assets?: Array<{ name: string; browser_download_url: string; size?: number }>;
     };
     const version = String(release.tag_name || "").replace(/^v/i, "");
-    if (version && compareAppVersion(app.getVersion(), version) >= 0) {
-      const msg = `GitHub latest is v${version}, which is already installed. Publish a newer release (Setup.exe + latest.yml), then try again.`;
-      sendToRenderer({ type: "update-not-available", data: { version } });
+    const appNeedsUpdate = !version || compareAppVersion(app.getVersion(), version) < 0;
+    if (version && !appNeedsUpdate) {
+      const synced = await syncLocalInstallerQuiet({ versionHint: version });
+      const localNote = synced.ok && !synced.skipped
+        ? ` Local Setup.exe is now v${synced.version}.`
+        : "";
+      const msg = `GitHub latest is v${version}, which is already installed.${localNote}`;
+      sendToRenderer({ type: "update-not-available", data: { version, localSync: synced } });
       return { ok: false, error: msg };
     }
 
@@ -251,13 +287,14 @@ async function downloadGithubInstaller(): Promise<{
     sendToRenderer({ type: "download-progress", data: { percent: 100 } });
 
     pendingGithubInstaller = { path: dest, version };
+    await syncLocalInstallerQuiet({ sourceExePath: dest, versionHint: version, force: true });
     sendToRenderer({
       type: "update-downloaded",
       data: {
         version,
         method: "github-installer",
         releaseNotes: [
-          "Download complete. ZenHosp will close, install the update, and reopen.",
+          "Download complete. ZenHosp will close, install the update, and reopen. The project Setup.exe was updated too.",
         ],
       },
     });
@@ -379,6 +416,10 @@ async function checkForUpdatesInternal(options?: { quiet?: boolean }): Promise<{
 
   try {
     const result = await autoUpdater.checkForUpdates();
+    const nextVersion = (result?.updateInfo as { version?: string } | null)?.version || "";
+    if (!nextVersion || compareAppVersion(app.getVersion(), nextVersion) >= 0) {
+      await syncLocalInstallerQuiet({ versionHint: nextVersion });
+    }
     return {
       ok: true,
       skipped: false as const,
@@ -409,6 +450,7 @@ async function downloadUpdateInternal(): Promise<{
   if (configureFeedIfNeeded()) {
     try {
       await autoUpdater.downloadUpdate();
+      await syncLocalInstallerQuiet({ force: true });
       return { ok: true, method: "electron-updater" as const };
     } catch {
       /* fall through to GitHub Setup.exe using the same config owner/repo */
@@ -441,6 +483,8 @@ export async function startSilentUpdateCheck(): Promise<void> {
       (check.updateInfo as { version?: string } | null)?.version || "";
     if (nextVersion && compareAppVersion(app.getVersion(), nextVersion) < 0) {
       await downloadUpdateInternal();
+    } else {
+      await syncLocalInstallerQuiet({ versionHint: nextVersion });
     }
     return;
   }
@@ -461,14 +505,24 @@ export function registerUpdaterIpcOnce(): void {
   ipcRegistered = true;
   bindAutoUpdaterListenersOnce();
 
-  ipcMain.handle("updater:get-version", () => ({
-    version: app.getVersion(),
-    isPackaged: app.isPackaged,
-    provider: updateConfig?.provider || "github",
-    githubOwner: updateConfig?.owner || process.env.ZENHOSP_GITHUB_OWNER || "",
-    githubRepo: updateConfig?.repo || process.env.ZENHOSP_GITHUB_REPO || "",
-    feedUrl: updateConfig?.feedUrl || "",
-  }));
+  ipcMain.handle("updater:get-version", () => {
+    const desktopRoot = resolveDesktopProjectRoot();
+    return {
+      version: app.getVersion(),
+      isPackaged: app.isPackaged,
+      provider: updateConfig?.provider || "github",
+      githubOwner: githubOwner(),
+      githubRepo: githubRepo(),
+      feedUrl: updateConfig?.feedUrl || "",
+      localDesktopRoot: desktopRoot || "",
+      localSetupVersion: desktopRoot ? readLocalSetupVersion(desktopRoot) : "",
+    };
+  });
+
+  ipcMain.handle("updater:sync-local-installer", async () => {
+    await mergeFeedFromBackend();
+    return syncLocalInstallerQuiet({ force: true });
+  });
 
   ipcMain.handle("updater:check", async () => {
     return checkForUpdatesInternal();
