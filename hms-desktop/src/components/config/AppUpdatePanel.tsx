@@ -10,6 +10,39 @@ import {
   type VersionInfo,
 } from "../../lib/api/services/versionService";
 
+/**
+ * Always-on listener: when the main process finishes a quiet download,
+ * close and install (no terminal). Waits if a patient task is in progress.
+ */
+export const DesktopUpdateAutoInstaller: React.FC = () => {
+  const { isSafeToRestartForUpdate } = useUpdateSession();
+  const updater = getZenHospUpdater();
+  const [pendingInstall, setPendingInstall] = useState(false);
+  const installingRef = useRef(false);
+
+  useEffect(() => {
+    if (!updater) return;
+    return updater.onUpdaterEvent((evt) => {
+      if (evt.type === "update-downloaded") {
+        setPendingInstall(true);
+      }
+    });
+  }, [updater]);
+
+  useEffect(() => {
+    if (!updater || !pendingInstall || !isSafeToRestartForUpdate || installingRef.current) {
+      return;
+    }
+    installingRef.current = true;
+    const timer = window.setTimeout(() => {
+      void updater.quitAndInstall();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [updater, pendingInstall, isSafeToRestartForUpdate]);
+
+  return null;
+};
+
 type UiPhase =
   | "idle"
   | "checking"
@@ -388,8 +421,9 @@ const AppUpdatePanel: React.FC = () => {
     <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
       <h2 className="text-xl font-semibold text-gray-900 mb-2">App updates</h2>
       <p className="text-sm text-gray-600 mb-4">
-        Check for a newer ZenHosp build, then click Download and install. When the download
-        finishes and no patient work is in progress, ZenHosp closes, installs, and reopens.
+        Check for a newer ZenHosp build, then click Download and install. The download and
+        install run in the background (no command window). When it is safe, ZenHosp closes,
+        installs, and reopens on the new version.
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-800 mb-4">

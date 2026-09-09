@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildDelayedNsisInstallCommand,
   NSIS_UPDATE_FLAGS,
+  WINDOWS_CREATE_NO_WINDOW,
+  buildHiddenInstallScript,
+  escapeVbsString,
+  hiddenHelperSpawnSpec,
   quoteWindowsPath,
 } from "../../main/nsisUpdateLaunch";
 
@@ -16,17 +19,30 @@ describe("nsisUpdateLaunch", () => {
     expect(quoteWindowsPath('C:\\Temp\\"evil.exe')).toBe('"C:\\Temp\\evil.exe"');
   });
 
-  it("builds a delayed silent NSIS command that relaunches the app", () => {
-    const dest = "C:\\Users\\lenovo\\AppData\\Local\\Temp\\ZenHosp-Setup.exe";
-    const { file, args } = buildDelayedNsisInstallCommand(dest);
+  it("escapes quotes for VBScript", () => {
+    expect(escapeVbsString('C:\\Temp\\"evil.exe')).toBe('C:\\Temp\\""evil.exe');
+  });
 
-    expect(file).toBe("cmd.exe");
-    expect(args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
-    const cmdline = args[3];
-    expect(cmdline).toContain("ping 127.0.0.1 -n 3");
-    expect(cmdline).toContain(`"${dest}"`);
+  it("builds a hidden VBS installer that relaunches the app", () => {
+    const dest = "C:\\Users\\lenovo\\AppData\\Local\\Temp\\ZenHosp-Setup.exe";
+    const script = buildHiddenInstallScript(dest);
+
+    expect(script).toContain("WScript.Sleep 3000");
+    expect(script).toContain(dest);
+    expect(script).toContain(', 0, False');
     for (const flag of NSIS_UPDATE_FLAGS) {
-      expect(cmdline).toContain(flag);
+      expect(script).toContain(flag);
     }
+    expect(script).not.toContain("cmd.exe");
+    expect(script).not.toContain("ping ");
+  });
+
+  it("launches wscript hidden with no console window", () => {
+    const spec = hiddenHelperSpawnSpec("C:\\Temp\\zenhosp-update.vbs");
+    expect(spec.file).toBe("wscript.exe");
+    expect(spec.args).toEqual(["//B", "//Nologo", "C:\\Temp\\zenhosp-update.vbs"]);
+    expect(spec.options.windowsHide).toBe(true);
+    expect(spec.options.detached).toBe(true);
+    expect(spec.options.windowsCreationFlags).toBe(WINDOWS_CREATE_NO_WINDOW);
   });
 });

@@ -7,6 +7,7 @@ import { hasModuleAccess } from '../lib/utils/rolePermissions';
 import { HospitalConfigProvider } from '../lib/contexts/HospitalConfigContext';
 import { UpdateSessionProvider } from '../lib/contexts/UpdateSessionContext';
 import VersionCompatibilityBanner from './config/VersionCompatibilityBanner';
+import { DesktopUpdateAutoInstaller } from './config/AppUpdatePanel';
 import LoginForm from './auth/LoginForm';
 import RoleBasedDashboard from './dashboard/RoleBasedDashboard';
 import PatientManagement from './patients/PatientManagement';
@@ -652,41 +653,40 @@ const App: React.FC = () => {
     });
   }
 
-  // Normal authentication flow
-  if (setupState === 'ready' && !isAuthenticated) {
-    return React.createElement(
-      'div',
-      { 
-        className: 'min-h-screen bg-gray-100 flex items-center justify-center',
-        style: { minHeight: '100vh', backgroundColor: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }
-      },
-      React.createElement(LoginForm, {
-        onLogin: handleLogin,
-        isLoading,
-        logoUrl: hospitalLogoUrl,
-        hospitalName: hospitalDisplayName,
-      })
-    );
-  }
+  if (setupState === 'ready') {
+    const readyBody = !isAuthenticated
+      ? React.createElement(
+          'div',
+          {
+            className: 'min-h-screen bg-gray-100 flex items-center justify-center',
+            style: { minHeight: '100vh', backgroundColor: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }
+          },
+          React.createElement(LoginForm, {
+            onLogin: handleLogin,
+            isLoading,
+            logoUrl: hospitalLogoUrl,
+            hospitalName: hospitalDisplayName,
+          })
+        )
+      : React.createElement(
+          'div',
+          { style: { minHeight: '100vh', backgroundColor: '#F0F0F0', display: 'flex', flexDirection: 'column' } },
+          renderNavigation(),
+          React.createElement(VersionCompatibilityBanner, {
+            onNavigateToSettings: () => setCurrentModule('configuration'),
+          }),
+          React.createElement(
+            'div',
+            { style: { flex: 1, padding: '0' } },
+            renderCurrentModule()
+          )
+        );
 
-  // Render main application if authenticated
-  if (setupState === 'ready' && isAuthenticated) {
     return React.createElement(
       UpdateSessionProvider,
       null,
-      React.createElement(
-        'div',
-        { style: { minHeight: '100vh', backgroundColor: '#F0F0F0', display: 'flex', flexDirection: 'column' } },
-        renderNavigation(),
-        React.createElement(VersionCompatibilityBanner, {
-          onNavigateToSettings: () => setCurrentModule('configuration'),
-        }),
-        React.createElement(
-          'div',
-          { style: { flex: 1, padding: '0' } },
-          renderCurrentModule()
-        )
-      )
+      React.createElement(DesktopUpdateAutoInstaller),
+      readyBody
     );
   }
 

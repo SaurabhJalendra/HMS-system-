@@ -1,12 +1,18 @@
 import { ipcMain, app, BrowserWindow } from "electron";
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync } from "node:fs";
+import { createWriteStream, existsSync, writeFileSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import path from "node:path";
 import { autoUpdater } from "electron-updater";
-import { buildDelayedNsisInstallCommand } from "./nsisUpdateLaunch";
+import {
+  buildHiddenInstallScript,
+  hiddenHelperSpawnSpec,
+} from "./nsisUpdateLaunch";
 import bundledUpdateConfig from "./update-config.json";
+import { resolveStoredApiUrl } from "./api-url-store";
+
+type UpdateProvider = "github" | "generic";
 
 type BundledUpdateConfig = {
   provider?: string;
@@ -16,11 +22,21 @@ type BundledUpdateConfig = {
   version?: string;
 };
 
-const updateConfig = bundledUpdateConfig as BundledUpdateConfig;
+type RemoteUpdateFeed = {
+  provider?: string;
+  owner?: string;
+  repo?: string;
+  feedUrl?: string | null;
+};
+
+const updateConfig: BundledUpdateConfig = {
+  ...(bundledUpdateConfig as BundledUpdateConfig),
+};
 
 let targetWindow: BrowserWindow | null = null;
 let listenersBound = false;
 let feedConfigured = false;
+let silentCheckStarted = false;
 let pendingGithubInstaller: { path: string; version?: string } | null = null;
 
 function sendToRenderer(payload: { type: string; data?: unknown }) {
@@ -33,6 +49,17 @@ function sendToRenderer(payload: { type: string; data?: unknown }) {
   }
 }
 
+function allowDevUpdater(): boolean {
+  return (
+    process.env.ZENHOSP_UPDATER_TEST_DEV === "1" ||
+    process.env.ZENHOSP_UPDATER_TEST_DEV === "true"
+  );
+}
+
+function updatesAllowed(): boolean {
+  return app.isPackaged || allowDevUpdater();
+}
+
 function resolveGenericFeedUrl(): string | null {
   const fromEnv = process.env.ZENHOSP_UPDATE_FEED_URL?.trim();
   if (fromEnv) return fromEnv;
@@ -41,10 +68,25 @@ function resolveGenericFeedUrl(): string | null {
   return null;
 }
 
+function applyRemoteFeed(remote: RemoteUpdateFeed | null | undefined): void {
+  if (!remote) return;
+  const provider = (remote.provider || "").trim().toLowerCase();
+  if (provider === "github" || provider === "generic") {
+    updateConfig.provider = provider;
+    feedConfigured = false;
+  }
+  if (remote.owner?.trim()) updateConfig.owner = remote.owner.trim();
+  if (remote.repo?.trim()) updateConfig.repo = remote.repo.trim();
+  if (remote.feedUrl?.trim()) {
+    updateConfig.feedUrl = remote.feedUrl.trim();
+    feedConfigured = false;
+  }
+}
+
 function configureFeedIfNeeded(): boolean {
   if (feedConfigured) return true;
 
-  const provider = (updateConfig?.provider || "github").toLowerCase();
+  const provider = (updateConfig?.provider || "github").toLowerCase() as UpdateProvider;
 
   if (provider === "github") {
     const owner =
@@ -107,6 +149,28 @@ function compareAppVersion(a: string, b: string): number {
     if (diff !== 0) return diff;
   }
   return 0;
+}
+
+async function mergeFeedFromBackend(): Promise<void> {
+  try {
+    const apiUrl = resolveStoredApiUrl();
+    if (!apiUrl) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${apiUrl.replace(/\/+$/, "")}/version`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return;
+    const body = (await res.json()) as {
+      data?: { update?: RemoteUpdateFeed };
+      update?: RemoteUpdateFeed;
+    };
+    applyRemoteFeed(body?.data?.update || body?.update);
+  } catch {
+    /* bundled update-config.json remains the feed */
+  }
 }
 
 async function downloadGithubInstaller(): Promise<{
@@ -211,6 +275,7 @@ function bindAutoUpdaterListenersOnce() {
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = console;
 
   autoUpdater.on("checking-for-update", () => {
     sendToRenderer({ type: "checking-for-update" });
@@ -235,6 +300,156 @@ function bindAutoUpdaterListenersOnce() {
   });
 }
 
+function launchHiddenInstallerThenQuit(): {
+  ok: boolean;
+  error?: string;
+  method?: string;
+} {
+  const installerPath = pendingGithubInstaller?.path;
+  if (!installerPath || !existsSync(installerPath)) {
+    const msg = "The downloaded installer is missing. Download the update again.";
+    sendToRenderer({ type: "error", data: { message: msg } });
+    return { ok: false, error: msg };
+  }
+
+  try {
+    const scriptPath = path.join(app.getPath("temp"), "zenhosp-update-install.vbs");
+    writeFileSync(scriptPath, buildHiddenInstallScript(installerPath), "utf8");
+    const spec = hiddenHelperSpawnSpec(scriptPath);
+    const child = spawn(spec.file, spec.args, spec.options);
+    child.unref();
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    sendToRenderer({ type: "error", data: { message } });
+    return { ok: false, error: message };
+  }
+
+  setImmediate(() => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.removeAllListeners("close");
+      if (!win.isDestroyed()) win.close();
+    }
+    app.exit(0);
+  });
+  return { ok: true, method: "github-installer" };
+}
+
+function performQuitAndInstall(): { ok: boolean; error?: string; method?: string } {
+  if (pendingGithubInstaller?.path) {
+    return launchHiddenInstallerThenQuit();
+  }
+  setImmediate(() => {
+    try {
+      autoUpdater.quitAndInstall(true, true);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      sendToRenderer({ type: "error", data: { message } });
+    }
+  });
+  return { ok: true, method: "electron-updater" };
+}
+
+async function checkForUpdatesInternal(options?: { quiet?: boolean }): Promise<{
+  ok: boolean;
+  skipped?: boolean;
+  error?: string;
+  updateInfo?: unknown;
+}> {
+  const quiet = Boolean(options?.quiet);
+  if (!updatesAllowed()) {
+    if (!quiet) {
+      sendToRenderer({
+        type: "dev-skipped",
+        data: {
+          message:
+            "Updates are disabled in unpackaged dev runs. Set ZENHOSP_UPDATER_TEST_DEV=1 to test, or use a packaged build.",
+        },
+      });
+    }
+    return { ok: true, skipped: true as const };
+  }
+
+  await mergeFeedFromBackend();
+
+  if (!configureFeedIfNeeded()) {
+    const msg = feedNotConfiguredMessage();
+    if (!quiet) sendToRenderer({ type: "error", data: { message: msg } });
+    return { ok: false, error: msg };
+  }
+
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return {
+      ok: true,
+      skipped: false as const,
+      updateInfo: result?.updateInfo ?? null,
+    };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    const friendly =
+      /Cannot find latest\.yml/i.test(message) ||
+      (/latest\.yml/i.test(message) && /404/i.test(message))
+        ? "Update feed is incomplete: latest.yml is missing from the GitHub release. Upload latest.yml (with the Setup.exe) to the latest release, then try again."
+        : message;
+    if (!quiet) sendToRenderer({ type: "error", data: { message: friendly } });
+    return { ok: false, error: friendly };
+  }
+}
+
+async function downloadUpdateInternal(): Promise<{
+  ok: boolean;
+  error?: string;
+  method?: "electron-updater" | "github-installer";
+  version?: string;
+}> {
+  if (!updatesAllowed()) {
+    return { ok: false, error: "Download skipped in development (unpackaged)." };
+  }
+  await mergeFeedFromBackend();
+  if (configureFeedIfNeeded()) {
+    try {
+      await autoUpdater.downloadUpdate();
+      return { ok: true, method: "electron-updater" as const };
+    } catch {
+      /* fall through to GitHub Setup.exe using the same config owner/repo */
+    }
+  }
+  const fallback = await downloadGithubInstaller();
+  return {
+    ok: fallback.ok,
+    error: fallback.error,
+    method: fallback.ok ? "github-installer" : undefined,
+    version: fallback.version,
+  };
+}
+
+/**
+ * Packaged app: ask the backend which feed to use, then check/download
+ * quietly in the main process. No terminal window.
+ */
+export async function startSilentUpdateCheck(): Promise<void> {
+  if (silentCheckStarted) return;
+  silentCheckStarted = true;
+  if (!updatesAllowed()) return;
+
+  bindAutoUpdaterListenersOnce();
+  const check = await checkForUpdatesInternal({ quiet: true });
+  if (check.skipped) return;
+
+  if (check.ok) {
+    const nextVersion =
+      (check.updateInfo as { version?: string } | null)?.version || "";
+    if (nextVersion && compareAppVersion(app.getVersion(), nextVersion) < 0) {
+      await downloadUpdateInternal();
+    }
+    return;
+  }
+
+  if ((updateConfig.provider || "github") === "github") {
+    await downloadGithubInstaller();
+  }
+}
+
 export function setUpdaterTargetWindow(win: BrowserWindow | null) {
   targetWindow = win;
 }
@@ -249,113 +464,26 @@ export function registerUpdaterIpcOnce(): void {
   ipcMain.handle("updater:get-version", () => ({
     version: app.getVersion(),
     isPackaged: app.isPackaged,
+    provider: updateConfig?.provider || "github",
     githubOwner: updateConfig?.owner || process.env.ZENHOSP_GITHUB_OWNER || "",
     githubRepo: updateConfig?.repo || process.env.ZENHOSP_GITHUB_REPO || "",
+    feedUrl: updateConfig?.feedUrl || "",
   }));
 
   ipcMain.handle("updater:check", async () => {
-    const allowDev =
-      process.env.ZENHOSP_UPDATER_TEST_DEV === "1" ||
-      process.env.ZENHOSP_UPDATER_TEST_DEV === "true";
-    if (!app.isPackaged && !allowDev) {
-      sendToRenderer({
-        type: "dev-skipped",
-        data: {
-          message:
-            "Updates are disabled in unpackaged dev runs. Set ZENHOSP_UPDATER_TEST_DEV=1 to test, or use a packaged build.",
-        },
-      });
-      return { ok: true, skipped: true as const };
-    }
-
-    if (!configureFeedIfNeeded()) {
-      const msg = feedNotConfiguredMessage();
-      sendToRenderer({ type: "error", data: { message: msg } });
-      return { ok: false, error: msg };
-    }
-
-    try {
-      const result = await autoUpdater.checkForUpdates();
-      return {
-        ok: true,
-        skipped: false as const,
-        updateInfo: result?.updateInfo ?? null,
-      };
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      const friendly =
-        /Cannot find latest\.yml/i.test(message) ||
-        (/latest\.yml/i.test(message) && /404/i.test(message))
-          ? "Update feed is incomplete: latest.yml is missing from the GitHub release. Upload latest.yml (with the Setup.exe) to the latest release, then try again."
-          : message;
-      sendToRenderer({ type: "error", data: { message: friendly } });
-      return { ok: false, error: friendly };
-    }
+    return checkForUpdatesInternal();
   });
 
   ipcMain.handle("updater:download", async () => {
-    if (!app.isPackaged && process.env.ZENHOSP_UPDATER_TEST_DEV !== "1" && process.env.ZENHOSP_UPDATER_TEST_DEV !== "true") {
-      return { ok: false, error: "Download skipped in development (unpackaged)." };
-    }
-    if (configureFeedIfNeeded()) {
-      try {
-        await autoUpdater.downloadUpdate();
-        return { ok: true, method: "electron-updater" as const };
-      } catch {
-        /* fall through to GitHub Setup.exe */
-      }
-    }
-    return downloadGithubInstaller();
+    return downloadUpdateInternal();
   });
 
   ipcMain.handle("updater:install-github-release", async () => {
+    await mergeFeedFromBackend();
     return downloadGithubInstaller();
   });
 
   ipcMain.handle("updater:quit-and-install", () => {
-    if (pendingGithubInstaller?.path) {
-      return launchGithubInstallerThenQuit();
-    }
-    setImmediate(() => {
-      try {
-        // Silent + relaunch so NSIS does not ask the user to close ZenHosp.
-        autoUpdater.quitAndInstall(true, true);
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        sendToRenderer({ type: "error", data: { message } });
-      }
-    });
-    return { ok: true, method: "electron-updater" as const };
+    return performQuitAndInstall();
   });
-}
-
-function launchGithubInstallerThenQuit(): {
-  ok: boolean;
-  error?: string;
-  method?: string;
-} {
-  const installerPath = pendingGithubInstaller?.path;
-  if (!installerPath || !existsSync(installerPath)) {
-    const msg = "The downloaded installer is missing. Download the update again.";
-    sendToRenderer({ type: "error", data: { message: msg } });
-    return { ok: false, error: msg };
-  }
-
-  const { file, args } = buildDelayedNsisInstallCommand(installerPath);
-  const child = spawn(file, args, {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  child.unref();
-
-  // Exit immediately so Program Files unlocks before NSIS starts (~2s later).
-  setImmediate(() => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.removeAllListeners("close");
-      if (!win.isDestroyed()) win.close();
-    }
-    app.exit(0);
-  });
-  return { ok: true, method: "github-installer" };
 }

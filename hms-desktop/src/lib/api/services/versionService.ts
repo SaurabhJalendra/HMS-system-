@@ -1,5 +1,12 @@
 import apiClient from "../config";
 
+export type DesktopUpdateFeed = {
+  provider?: "github" | "generic" | string;
+  owner?: string;
+  repo?: string;
+  feedUrl?: string | null;
+};
+
 export type VersionInfo = {
   backendVersion: string;
   minimumDesktopVersion: string;
@@ -7,6 +14,7 @@ export type VersionInfo = {
   releaseNotes: string[];
   publishedAt: string | null;
   serverTime: string;
+  update?: DesktopUpdateFeed;
 };
 
 export type VersionCompatibility =

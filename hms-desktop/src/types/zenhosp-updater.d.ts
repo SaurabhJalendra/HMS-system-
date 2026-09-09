@@ -7,8 +7,10 @@ export type ZenHospUpdaterAPI = {
   getVersion: () => Promise<{
     version: string;
     isPackaged: boolean;
+    provider?: string;
     githubOwner?: string;
     githubRepo?: string;
+    feedUrl?: string;
   }>;
   checkForUpdates: () => Promise<{
     ok: boolean;
