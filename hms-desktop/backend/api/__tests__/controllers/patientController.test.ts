@@ -151,6 +151,23 @@ describe('Patient Controller', () => {
       );
     });
 
+    it('should reject a phone number that is not exactly 10 digits', async () => {
+      const patientData = {
+        name: 'Phone Too Long',
+        gender: 'MALE',
+        phone: '12345678901',
+        address: '123 Main St',
+        age: 30,
+      };
+
+      mockReq.body = patientData;
+
+      await createPatient(mockReq as AuthRequest, mockRes as Response);
+
+      expect(mockPrisma.patient.create).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+
     it('should validate required fields', async () => {
       const patientData = {
         name: '',

@@ -39,7 +39,10 @@ const patientCreateSchema = z.object({
     }).optional()
   ]).optional(),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER'], { message: 'Invalid gender' }),
-  phone: z.string().min(10, 'Phone number too short').max(15, 'Phone number too long'),
+  phone: z
+    .string()
+    .transform((val) => val.replace(/\D/g, ''))
+    .pipe(z.string().regex(/^[0-9]{10}$/, 'Phone number must be exactly 10 digits')),
   aadharCardNumber: z.string()
     .regex(/^[0-9]{12}$/, 'Aadhar card number must be exactly 12 digits')
     .optional()
@@ -50,7 +53,7 @@ const patientCreateSchema = z.object({
     z.literal('')
   ]).optional(), // Allow empty (foreign patients use this when provided)
   address: z.string().min(1, 'Address is required').max(500, 'Address too long'),
-  bloodGroup: z.string().optional(),
+  bloodGroup: z.string().trim().max(20, 'Blood group is too long').optional().or(z.literal('')),
   allergies: z.string().optional(),
   chronicConditions: z.string().optional(),
   emergencyContactName: z.string().optional(),
@@ -62,8 +65,8 @@ const patientCreateSchema = z.object({
   const hasAge = data.age !== undefined && data.age !== null;
   return hasDateOfBirth || hasAge;
 }, {
-  message: 'Either dateOfBirth or age must be provided',
-  path: ['dateOfBirth']
+  message: 'Age is required',
+  path: ['age']
 });
 
 const patientUpdateSchema = patientCreateSchema.partial();
@@ -223,6 +226,7 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
       data: {
         id: patientId,
         ...finalPatientData,
+        phone: finalPatientData.phone as string,
       },
     });
 
@@ -432,7 +436,12 @@ export const getPatientById = async (req: AuthRequest, res: Response) => {
 
     res.json({
       success: true,
-      data: { patient },
+      data: {
+        patient: {
+          ...patient,
+          age: calculateAge(patient.dateOfBirth),
+        },
+      },
     });
   } catch (error) {
     console.error('Get patient by ID error:', error);
@@ -700,7 +709,12 @@ export const searchPatientByPhone = async (req: AuthRequest, res: Response) => {
 
     res.json({
       success: true,
-      data: { patients },
+      data: {
+        patients: patients.map((patient) => ({
+          ...patient,
+          age: calculateAge(patient.dateOfBirth),
+        })),
+      },
     });
   } catch (error) {
     console.error('Search patient by phone error:', error);

@@ -13,7 +13,7 @@ export const infoContent = {
       personalInfo: {
         title: 'Registration details',
         content:
-          'Capture legal name, date of birth, gender, phone (unique), address, and optional Aadhaar or passport for the human-readable patient ID. Emergency contacts help admissions and follow-up.',
+          'Capture legal name, age in years, gender, a unique 10-digit phone, address, optional Aadhaar or passport for the human-readable patient ID, and blood group from the standard list. Emergency contacts help admissions and follow-up.',
       },
       medicalHistory: {
         title: 'Clinical context',
@@ -43,7 +43,7 @@ export const infoContent = {
       },
       age: {
         title: 'Age',
-        content: 'Derived from date of birth in this app; used for dosing and eligibility context.',
+        content: 'Entered in years at registration (0–150). The system stores an approximate date of birth from that age for dosing and eligibility context.',
       },
       gender: {
         title: 'Gender',
@@ -51,7 +51,7 @@ export const infoContent = {
       },
       phone: {
         title: 'Phone',
-        content: 'Must be unique—primary channel for appointments and reminders.',
+        content: 'Must be unique and exactly 10 digits. Letters and symbols are not allowed.',
       },
       address: {
         title: 'Address',
@@ -59,7 +59,7 @@ export const infoContent = {
       },
       bloodGroup: {
         title: 'Blood group',
-        content: 'Optional; important for transfusion and surgical planning.',
+        content: 'Optional dropdown: A+, B+, AB+, O+, A-, B-, AB-, O-, N.A (not known), or Other for rare groups. Important for transfusion and surgical planning.',
       },
     },
   },
@@ -72,7 +72,7 @@ export const infoContent = {
       receptionist: {
         title: 'Reception',
         content:
-          'Search or register the patient, pick doctor and slot, then confirm—patient appears in the doctor’s queue for that day.',
+          'Search or register the patient (age in years, 10-digit phone, blood group dropdown), pick doctor and slot, then confirm—patient appears in the doctor’s queue for that day.',
       },
       doctor: {
         title: 'Doctor',

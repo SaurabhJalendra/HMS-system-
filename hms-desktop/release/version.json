@@ -1,10 +1,10 @@
 {
-  "version": "1.0.9",
-  "backendVersion": "1.0.9",
+  "version": "1.0.10",
+  "backendVersion": "1.0.10",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.9",
+  "latestDesktopVersion": "1.0.10",
   "releaseNotes": [
-    "Keep desktop and backend version files at 1.0.9"
+    "update the opd module for age and all other things."
   ],
-  "publishedAt": "2026-09-09T06:35:52.510Z"
+  "publishedAt": "2026-09-09T09:01:32.431Z"
 }
