@@ -1,10 +1,10 @@
 {
-  "version": "1.0.7",
-  "backendVersion": "1.0.7",
+  "version": "1.0.8",
+  "backendVersion": "1.0.8",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.7",
+  "latestDesktopVersion": "1.0.8",
   "releaseNotes": [
-    "Add doctor consultation fee and automatic patient billing"
+    "Fix silent desktop update and restart"
   ],
-  "publishedAt": "2026-09-04T07:27:17.089Z"
+  "publishedAt": "2026-09-09T05:09:50.820Z"
 }

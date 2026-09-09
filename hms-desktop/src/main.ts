@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, globalShortcut, ipcMain, nativeImage } from "
 import fs from "node:fs";
 import path from "node:path";
 import started from "electron-squirrel-startup";
-import { registerUpdaterIpcOnce, setUpdaterTargetWindow } from "./main/updater";
+import { registerUpdaterIpcOnce, setUpdaterTargetWindow, startSilentUpdateCheck } from "./main/updater";
 import { registerApiUrlIpcOnce } from "./main/api-url-store";
 
 function resolveBundledAppIcon(): string | undefined {
@@ -218,6 +218,7 @@ const createWindow = () => {
       mainWindow.webContents.closeDevTools();
       desktopLogger.info('DevTools closed after reload');
     }
+    void startSilentUpdateCheck();
   });
 
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {

@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export type DesktopUpdateFeed = {
+  provider: "github" | "generic";
+  owner?: string;
+  repo?: string;
+  feedUrl?: string | null;
+};
+
 export type ReleaseManifest = {
   version: string;
   backendVersion: string;
@@ -89,6 +96,27 @@ export function getReleaseManifest(): ReleaseManifest {
   };
 
   return cached;
+}
+
+/**
+ * Where packaged desktops should look for Setup.exe / latest.yml.
+ * Same env names as hms-desktop/scripts/generate-update-config.mjs.
+ */
+export function getDesktopUpdateFeed(): DesktopUpdateFeed {
+  const provider =
+    (process.env.ZENHOSP_UPDATE_PROVIDER || "github").trim().toLowerCase() ===
+    "generic"
+      ? "generic"
+      : "github";
+
+  const feedUrl = (process.env.ZENHOSP_UPDATE_FEED_URL || "").trim() || null;
+
+  return {
+    provider,
+    owner: (process.env.ZENHOSP_GITHUB_OWNER || "SaurabhJalendra").trim(),
+    repo: (process.env.ZENHOSP_GITHUB_REPO || "HMS-system-").trim(),
+    feedUrl,
+  };
 }
 
 /** Test helper */

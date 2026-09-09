@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { getReleaseManifest } from "../utils/releaseManifest";
+import { getDesktopUpdateFeed, getReleaseManifest } from "../utils/releaseManifest";
 
 /**
  * Public version endpoint for desktop ↔ backend compatibility checks.
@@ -17,6 +17,7 @@ export function getVersionInfo(req: Request, res: Response): void {
       releaseNotes: manifest.releaseNotes,
       publishedAt: manifest.publishedAt,
       serverTime: new Date().toISOString(),
+      update: getDesktopUpdateFeed(),
     },
   });
 }
