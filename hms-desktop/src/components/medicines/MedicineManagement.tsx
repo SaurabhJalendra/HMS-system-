@@ -601,30 +601,6 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
             size: 'md',
             variant: 'info'
           })
-        ),
-        React.createElement(
-          'button',
-          {
-            onClick: () => setActiveTab('add'),
-            style: {
-              backgroundColor: '#0078D4',
-              color: '#FFFFFF',
-              border: '1px solid #005A9E',
-              padding: '4px 12px',
-              borderRadius: '2px',
-              fontSize: '13px',
-              fontWeight: '400',
-              cursor: 'pointer',
-              boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.2)'
-            },
-            onMouseOver: (e) => {
-              e.target.style.backgroundColor = '#005A9E';
-            },
-            onMouseOut: (e) => {
-              e.target.style.backgroundColor = '#0078D4';
-            }
-          },
-          '+ Add Medicine'
         )
       ),
 
@@ -656,18 +632,6 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
               }`
             },
             'Medicine List'
-          ),
-          React.createElement(
-            'button',
-            {
-              onClick: () => setActiveTab('add'),
-              className: `py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'add' 
-                  ? 'border-blue-500 text-blue-600' 
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`
-            },
-            'Add Medicine'
           ),
           React.createElement(
             'button',
@@ -784,8 +748,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Category'),
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Price'),
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Stock'),
-                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Status'),
-                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Actions')
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Status')
               )
             ),
             React.createElement(
@@ -851,34 +814,6 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
                       { className: `px-2 py-1 text-xs font-medium rounded-full ${stockStatus === 'LOW' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}` },
                       stockStatus
                     )
-                  ),
-                  React.createElement(
-                    'td',
-                    { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium' },
-                    React.createElement(
-                      'button',
-                      {
-                        onClick: () => handleOpenStockUpdate(medicine),
-                        className: 'text-blue-600 hover:text-blue-900 mr-3'
-                      },
-                      'Update Stock'
-                    ),
-                    React.createElement(
-                      'button',
-                      {
-                        onClick: () => handleEdit(medicine),
-                        className: 'text-blue-600 hover:text-blue-900 mr-3 cursor-pointer'
-                      },
-                      'Edit'
-                    ),
-                    React.createElement(
-                      'button',
-                      {
-                        onClick: () => handleDelete(medicine),
-                        className: 'text-red-600 hover:text-red-900 cursor-pointer'
-                      },
-                      'Delete'
-                    )
                   )
                 );
               })
@@ -889,12 +824,18 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
     ),
 
     // Add Medicine Form
-    activeTab === 'add' && React.createElement(
+    showAddForm && React.createElement(
       'div',
-      { className: 'space-y-6' },
+      {
+        className: 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4',
+        onClick: () => setShowAddForm(false),
+      },
       React.createElement(
         'div',
-        { className: 'bg-white rounded-lg shadow p-6' },
+        {
+          className: 'bg-white rounded-lg shadow-xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto',
+          onClick: (event) => event.stopPropagation(),
+        },
         React.createElement(
           'h3',
           { className: 'text-lg font-medium text-gray-900 mb-6' },
@@ -1097,7 +1038,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
               'button',
               {
                 type: 'button',
-                onClick: () => setActiveTab('list'),
+                onClick: () => setShowAddForm(false),
                 className: 'px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50'
               },
               'Cancel'
@@ -1119,7 +1060,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
     // Inventory Management Tab
     activeTab === 'inventory' && React.createElement(
       'div',
-      { className: 'space-y-6' },
+      { className: 'space-y-6 flex flex-col' },
       inventorySyncBanner &&
         React.createElement(
           'div',
@@ -1131,7 +1072,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
       // Statistics Dashboard
       stats && React.createElement(
         'div',
-        { className: 'grid grid-cols-1 md:grid-cols-4 gap-4' },
+        { className: 'grid grid-cols-1 md:grid-cols-4 gap-4 order-1' },
         React.createElement(
           'div',
           { className: 'bg-white rounded-lg shadow p-6' },
@@ -1161,7 +1102,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
       // Low Stock Alerts
       React.createElement(
         'div',
-        { className: 'bg-white rounded-lg shadow' },
+        { className: 'bg-white rounded-lg shadow order-3' },
         React.createElement(
           'div',
           { className: 'px-6 py-4 border-b border-gray-200' },
@@ -1336,7 +1277,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
       // Transaction History
       React.createElement(
         'div',
-        { className: 'bg-white rounded-lg shadow' },
+        { className: 'bg-white rounded-lg shadow order-4' },
         React.createElement(
           'div',
           { className: 'px-6 py-4 border-b border-gray-200' },
@@ -1412,7 +1353,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
       // Quick Actions
       React.createElement(
         'div',
-        { className: 'bg-white rounded-lg shadow p-6' },
+        { className: 'bg-white rounded-lg shadow p-6 order-2' },
         React.createElement('h3', { className: 'text-lg font-medium text-gray-900 mb-4' }, '⚡ Quick Actions'),
       React.createElement(
         'div',
@@ -1484,7 +1425,8 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
             'button',
             {
               onClick: () => {
-                setActiveTab('add');
+                setShowAddForm(true);
+                setError('');
               },
               className: 'px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center'
             },
@@ -1499,7 +1441,11 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
     activeTab === 'orders' && React.createElement(
       OrderManagement,
       {
-        onBack: () => setActiveTab('list')
+        onBack: () => setActiveTab('list'),
+        onInventoryChanged: async () => {
+          await loadMedicines();
+          await loadInventoryData();
+        }
       }
     ),
 

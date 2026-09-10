@@ -8,6 +8,7 @@ import { FileParserService } from '../services/fileParserService';
 import { getRequiredHospitalId } from '../utils/hospitalHelper';
 import { getHospitalCurrencies, convertCurrency } from '../services/currencyService';
 import fs from 'fs';
+import path from 'path';
 
 const prisma = new PrismaClient();
 
@@ -119,8 +120,8 @@ export const createMedicine = async (req: AuthRequest, res: Response) => {
         therapeuticClass: validatedData.therapeuticClass || null,
         atcCode: validatedData.atcCode || null,
         price: validatedData.price,
-        stockQuantity: validatedData.quantity || 0,
-        lowStockThreshold: validatedData.lowStockThreshold || 10,
+        stockQuantity: validatedData.quantity ?? 0,
+        lowStockThreshold: validatedData.lowStockThreshold ?? 10,
         expiryDate: validatedData.expiryDate || null,
         isActive: true,
       },
@@ -864,13 +865,33 @@ export const getMedicineTransactions = async (req: AuthRequest, res: Response) =
 };
 
 // New validation schemas for enhanced functionality
+const newOrderMedicineSchema = z.object({
+  name: z.string().trim().min(1, 'Medicine name is required').max(200),
+  genericName: z.string().trim().min(1, 'Generic name is required').max(200),
+  manufacturer: z.string().trim().min(1, 'Manufacturer is required').max(200),
+  category: z.string().trim().min(1, 'Category is required').max(100),
+  code: z.string().trim().max(100).optional(),
+  lowStockThreshold: z.coerce.number().int().min(0, 'Low stock threshold must be non-negative'),
+});
+
+const orderItemSchema = z.object({
+  source: z.enum(['inventory', 'new']).default('inventory'),
+  medicineId: z.string().optional(),
+  newMedicine: newOrderMedicineSchema.optional(),
+  quantity: z.coerce.number().int().positive('Quantity must be positive'),
+  unitPrice: z.coerce.number().positive('Unit price must be positive'),
+}).superRefine((item, context) => {
+  if (item.source === 'inventory' && !item.medicineId?.trim()) {
+    context.addIssue({ code: 'custom', path: ['medicineId'], message: 'Select a medicine from inventory' });
+  }
+  if (item.source === 'new' && !item.newMedicine) {
+    context.addIssue({ code: 'custom', path: ['newMedicine'], message: 'Enter the new medicine details' });
+  }
+});
+
 const orderCreateSchema = z.object({
   supplierId: z.string().min(1, 'Supplier ID is required'),
-  orderItems: z.array(z.object({
-    medicineId: z.string().min(1, 'Medicine ID is required'),
-    quantity: z.number().int().positive('Quantity must be positive'),
-    unitPrice: z.number().positive('Unit price must be positive'),
-  })).min(1, 'At least one order item is required'),
+  orderItems: z.array(orderItemSchema).min(1, 'At least one order item is required'),
   expectedDelivery: z.string().optional(),
   notes: z.string().optional(),
 });
@@ -880,6 +901,22 @@ const orderStatusUpdateSchema = z.object({
   actualDelivery: z.string().optional(),
   invoiceNumber: z.string().optional(),
   invoiceFile: z.string().optional(),
+});
+
+const supplierCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Supplier name is required').max(200),
+  address: z.string().trim().max(500).optional(),
+  contact: z.string().trim().max(100).optional(),
+  email: z.string().trim().email('Enter a valid email address').optional().or(z.literal('')),
+  gstNumber: z.string()
+    .trim()
+    .transform((value) => value.toUpperCase())
+    .pipe(
+      z.string().regex(
+        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/,
+        'GST number must be a valid 15-character GSTIN',
+      ),
+    ),
 });
 
 // Import medicine catalog from file
@@ -896,17 +933,16 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
 
     filePath = req.file.path;
     const fileType = req.file.mimetype;
+    const extension = path.extname(req.file.originalname || '').toLowerCase();
 
     // Validate file type
     const allowedTypes = [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
       'application/vnd.ms-excel', // .xls
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      'application/octet-stream', // Some desktop clients do not provide an Excel MIME type.
     ];
 
-    if (!allowedTypes.includes(fileType)) {
+    if (!allowedTypes.includes(fileType) || !['.xlsx', '.xls'].includes(extension)) {
       // Clean up file
       if (filePath && fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
@@ -1420,58 +1456,78 @@ export const createMedicineOrder = async (req: AuthRequest, res: Response) => {
     const validatedData = orderCreateSchema.parse(req.body);
     const { supplierId, orderItems, expectedDelivery, notes } = validatedData;
 
-    // Generate order number
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-    // Calculate totals
-    let totalAmount = 0;
-    const processedItems = [];
+    const order = await prisma.$transaction(async (tx) => {
+      const supplier = await tx.supplier.findFirst({ where: { id: supplierId, isActive: true } });
+      if (!supplier) throw new Error('SUPPLIER_NOT_FOUND');
 
-    for (const item of orderItems) {
-      const medicine = await prisma.medicineCatalog.findUnique({
-        where: { id: item.medicineId }
-      });
+      let totalAmount = 0;
+      const processedItems: Array<{
+        medicineId: string;
+        quantity: number;
+        unitPrice: number;
+        totalPrice: number;
+      }> = [];
 
-      if (!medicine) {
-        return res.status(400).json({
-          success: false,
-          message: `Medicine with ID ${item.medicineId} not found`
+      for (const item of orderItems) {
+        let medicineId = item.medicineId;
+
+        if (item.source === 'new' && item.newMedicine) {
+          const duplicate = await tx.medicineCatalog.findFirst({
+            where: { name: { equals: item.newMedicine.name, mode: 'insensitive' }, isActive: true },
+          });
+          if (duplicate) throw new Error(`MEDICINE_EXISTS:${item.newMedicine.name}`);
+
+          const medicine = await tx.medicineCatalog.create({
+            data: {
+              code: item.newMedicine.code || `MED-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              name: item.newMedicine.name,
+              genericName: item.newMedicine.genericName,
+              manufacturer: item.newMedicine.manufacturer,
+              category: item.newMedicine.category,
+              price: item.unitPrice,
+              stockQuantity: 0,
+              lowStockThreshold: item.newMedicine.lowStockThreshold,
+              isActive: true,
+            },
+          });
+          medicineId = medicine.id;
+        } else {
+          const medicine = await tx.medicineCatalog.findFirst({
+            where: { id: medicineId, isActive: true },
+          });
+          if (!medicine) throw new Error(`MEDICINE_NOT_FOUND:${medicineId}`);
+        }
+
+        const totalPrice = item.quantity * item.unitPrice;
+        totalAmount += totalPrice;
+        processedItems.push({
+          medicineId: medicineId!,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice,
         });
       }
 
-      const itemTotal = item.quantity * item.unitPrice;
-      totalAmount += itemTotal;
-
-      processedItems.push({
-        medicineId: item.medicineId,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        totalPrice: itemTotal
-      });
-    }
-
-    // Create order
-    const order = await prisma.medicineOrder.create({
-      data: {
-        orderNumber,
-        supplierId,
-        orderDate: new Date(),
-        expectedDelivery: expectedDelivery ? new Date(expectedDelivery) : null,
-        totalAmount,
-        notes,
-        createdBy: req.user!.id,
-        orderItems: {
-          create: processedItems
-        }
-      },
-      include: {
-        supplier: true,
-        orderItems: {
-          include: {
-            medicine: true
+      return tx.medicineOrder.create({
+        data: {
+          orderNumber,
+          supplierId,
+          orderDate: new Date(),
+          expectedDelivery: expectedDelivery ? new Date(expectedDelivery) : null,
+          totalAmount,
+          notes,
+          createdBy: req.user!.id,
+          orderItems: { create: processedItems },
+        },
+        include: {
+          supplier: true,
+          orderItems: {
+            include: { medicine: true },
           }
-        }
-      }
+        },
+      });
     });
 
     // Log the action
@@ -1488,13 +1544,26 @@ export const createMedicineOrder = async (req: AuthRequest, res: Response) => {
       message: 'Medicine order created successfully',
       data: { order }
     });
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({
         success: false,
         message: 'Validation error',
         errors: error.issues,
       });
+    }
+
+    if (error.message === 'SUPPLIER_NOT_FOUND') {
+      return res.status(400).json({ success: false, message: 'Selected supplier was not found or is inactive' });
+    }
+    if (error.message?.startsWith('MEDICINE_EXISTS:')) {
+      return res.status(400).json({
+        success: false,
+        message: `"${error.message.slice('MEDICINE_EXISTS:'.length)}" already exists. Select it from inventory instead.`,
+      });
+    }
+    if (error.message?.startsWith('MEDICINE_NOT_FOUND:')) {
+      return res.status(400).json({ success: false, message: 'One of the selected medicines was not found' });
     }
 
     console.error('Create medicine order error:', error);
@@ -1563,50 +1632,81 @@ export const updateOrderStatus = async (req: AuthRequest, res: Response) => {
     const validatedData = orderStatusUpdateSchema.parse(req.body);
     const { status, actualDelivery, invoiceNumber, invoiceFile } = validatedData;
 
-    const order = await prisma.medicineOrder.update({
-      where: { id },
-      data: {
-        status,
-        actualDelivery: actualDelivery ? new Date(actualDelivery) : null,
-        invoiceNumber,
-        invoiceFile
-      },
-      include: {
-        supplier: true,
-        orderItems: {
-          include: {
-            medicine: true
-          }
+    const order = await prisma.$transaction(async (tx) => {
+      const existingOrder = await tx.medicineOrder.findUnique({
+        where: { id },
+        include: { orderItems: true },
+      });
+      if (!existingOrder) throw new Error('ORDER_NOT_FOUND');
+      if (existingOrder.status === 'DELIVERED') throw new Error('ORDER_ALREADY_DELIVERED');
+      if (existingOrder.status === 'CANCELLED') throw new Error('ORDER_CANCELLED');
+
+      if (status === 'DELIVERED') {
+        // Claim the transition before changing stock. The status condition makes
+        // repeated or concurrent delivery requests safe.
+        const claimed = await tx.medicineOrder.updateMany({
+          where: {
+            id,
+            status: { notIn: ['DELIVERED', 'CANCELLED'] },
+          },
+          data: {
+            status: 'DELIVERED',
+            actualDelivery: actualDelivery ? new Date(actualDelivery) : new Date(),
+          },
+        });
+        if (claimed.count !== 1) throw new Error('ORDER_ALREADY_DELIVERED');
+
+        for (const item of existingOrder.orderItems) {
+          await tx.medicineCatalog.update({
+            where: { id: item.medicineId },
+            data: { stockQuantity: { increment: item.quantity } },
+          });
+          await tx.medicineOrderItem.update({
+            where: { id: item.id },
+            data: { receivedQty: item.quantity },
+          });
         }
       }
-    });
 
-    // If order is delivered, update stock
-    if (status === 'DELIVERED') {
-      for (const item of order.orderItems) {
-        await prisma.medicineCatalog.update({
-          where: { id: item.medicineId },
-          data: {
-            stockQuantity: {
-              increment: item.receivedQty || item.quantity
-            }
-          }
-        });
-      }
-    }
+      return tx.medicineOrder.update({
+        where: { id },
+        data: {
+          status,
+          actualDelivery: status === 'DELIVERED'
+            ? (actualDelivery ? new Date(actualDelivery) : new Date())
+            : (actualDelivery ? new Date(actualDelivery) : undefined),
+          invoiceNumber,
+          invoiceFile,
+        },
+        include: {
+          supplier: true,
+          orderItems: { include: { medicine: true } },
+        },
+      });
+    });
 
     res.json({
       success: true,
       message: 'Order status updated successfully',
       data: { order }
     });
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({
         success: false,
         message: 'Validation error',
         errors: error.issues,
       });
+    }
+
+    if (error.message === 'ORDER_NOT_FOUND') {
+      return res.status(404).json({ success: false, message: 'Medicine order not found' });
+    }
+    if (error.message === 'ORDER_ALREADY_DELIVERED') {
+      return res.status(409).json({ success: false, message: 'This order is already delivered; stock was not changed again' });
+    }
+    if (error.message === 'ORDER_CANCELLED') {
+      return res.status(409).json({ success: false, message: 'A cancelled order cannot be changed or delivered' });
     }
 
     console.error('Update order status error:', error);
@@ -1675,14 +1775,32 @@ export const getSuppliers = async (req: AuthRequest, res: Response) => {
 // Create supplier
 export const createSupplier = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, address, contact, email, gstNumber } = req.body;
+    const { name, address, contact, email, gstNumber } = supplierCreateSchema.parse(req.body);
+
+    const existingSupplier = await prisma.supplier.findFirst({
+      where: {
+        OR: [
+          { gstNumber: { equals: gstNumber, mode: 'insensitive' } },
+          { name: { equals: name, mode: 'insensitive' } },
+        ],
+        isActive: true,
+      },
+    });
+    if (existingSupplier) {
+      return res.status(409).json({
+        success: false,
+        message: existingSupplier.gstNumber?.toUpperCase() === gstNumber
+          ? 'A supplier with this GST number already exists'
+          : 'A supplier with this name already exists',
+      });
+    }
 
     const supplier = await prisma.supplier.create({
       data: {
         name,
-        address,
-        contact,
-        email,
+        address: address || null,
+        contact: contact || null,
+        email: email || null,
         gstNumber
       }
     });
@@ -1693,6 +1811,14 @@ export const createSupplier = async (req: AuthRequest, res: Response) => {
       data: { supplier }
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: error.issues[0]?.message || 'Validation error',
+        errors: error.issues,
+      });
+    }
+
     console.error('Create supplier error:', error);
     res.status(500).json({
       success: false,

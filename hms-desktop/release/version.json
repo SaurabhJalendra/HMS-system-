@@ -1,10 +1,10 @@
 {
-  "version": "1.0.11",
-  "backendVersion": "1.0.11",
+  "version": "1.0.12",
+  "backendVersion": "1.0.12",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.11",
+  "latestDesktopVersion": "1.0.12",
   "releaseNotes": [
-    "Fix pharmacy prescription actions, statistics, patient age, inventory audit, and OPD templates"
+    "Improve medicine inventory, suppliers, ordering, delivery stock updates, and Excel catalog import"
   ],
-  "publishedAt": "2026-09-10T08:43:23.380Z"
+  "publishedAt": "2026-09-10T11:13:28.233Z"
 }
