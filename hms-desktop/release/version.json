@@ -1,10 +1,10 @@
 {
-  "version": "1.0.12",
-  "backendVersion": "1.0.12",
+  "version": "1.0.13",
+  "backendVersion": "1.0.13",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.12",
+  "latestDesktopVersion": "1.0.13",
   "releaseNotes": [
-    "Improve medicine inventory, suppliers, ordering, delivery stock updates, and Excel catalog import"
+    "Improve hospital configuration loading with automatic timeout retry"
   ],
-  "publishedAt": "2026-09-10T11:13:28.233Z"
+  "publishedAt": "2026-09-10T11:41:31.522Z"
 }
