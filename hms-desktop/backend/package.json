@@ -1,6 +1,6 @@
 {
   "name": "hms-backend",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "HMS Desktop Application Backend API",
   "main": "dist/index.js",
   "directories": {

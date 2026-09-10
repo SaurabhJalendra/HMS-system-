@@ -4,6 +4,7 @@ import catalogService from '../../../lib/api/services/catalogService';
 import type { Appointment } from '../../../lib/api/types';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import MedicineSearchSelect from './MedicineSearchSelect';
+import OpdPrescriptionTemplates from './OpdPrescriptionTemplates';
 import { useCriticalUpdateLock } from '../../../lib/hooks/useCriticalUpdateLock';
 
 interface PrescriptionLine {
@@ -42,6 +43,7 @@ const PrescriptionWriter: React.FC<PrescriptionWriterProps> = ({
   const [loading, setLoading] = useState(false);
   const [loadingMedicines, setLoadingMedicines] = useState(true);
   const [error, setError] = useState('');
+  const [showTemplates, setShowTemplates] = useState(false);
 
   const patientId = appointment.patientId || (appointment as any).patient?.id;
 
@@ -88,6 +90,18 @@ const PrescriptionWriter: React.FC<PrescriptionWriterProps> = ({
     setLines((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const applyTemplate = (templateLines: PrescriptionLine[]) => {
+    setLines(
+      templateLines.map((line) => ({
+        ...line,
+        medicineName:
+          medicines.find((medicine) => medicine.id === line.medicineId)?.name ||
+          line.medicineName,
+      })),
+    );
+    setError('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const valid = lines.filter((l) => l.medicineId && l.quantity > 0 && l.duration > 0);
@@ -126,9 +140,18 @@ const PrescriptionWriter: React.FC<PrescriptionWriterProps> = ({
 
   return (
     <div style={{ maxWidth: 640 }}>
-      <p style={{ marginBottom: 12, fontSize: 14 }}>
-        Prescription for <strong>{(appointment as any).patient?.name ?? 'Patient'}</strong>
-      </p>
+      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <p style={{ margin: 0, fontSize: 14 }}>
+          Prescription for <strong>{(appointment as any).patient?.name ?? 'Patient'}</strong>
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowTemplates(true)}
+          style={{ padding: '8px 12px', color: '#1D4ED8', border: '1px solid #93C5FD', borderRadius: '6px', backgroundColor: '#EFF6FF', cursor: 'pointer', fontSize: 13, fontWeight: 500 }}
+        >
+          Prescription templates
+        </button>
+      </div>
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {error && <p style={{ color: '#DC2626', fontSize: 14 }}>{error}</p>}
         {lines.map((line, index) => (
@@ -201,6 +224,13 @@ const PrescriptionWriter: React.FC<PrescriptionWriterProps> = ({
           </button>
         </div>
       </form>
+      {showTemplates && (
+        <OpdPrescriptionTemplates
+          currentLines={lines}
+          onApply={applyTemplate}
+          onClose={() => setShowTemplates(false)}
+        />
+      )}
     </div>
   );
 };

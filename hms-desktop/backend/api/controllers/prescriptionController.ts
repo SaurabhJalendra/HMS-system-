@@ -27,6 +27,15 @@ const prescriptionCreateSchema = z.object({
   items: z.array(prescriptionItemSchema).min(1, 'At least one medicine item is required'),
 });
 
+const prescriptionTemplateSchema = z.object({
+  name: z.string().trim().min(1, 'Template name is required').max(100),
+  description: z.string().trim().max(500).optional(),
+  templateData: z.array(prescriptionItemSchema.omit({ startDate: true, endDate: true }))
+    .min(1, 'A template needs at least one medicine'),
+});
+
+const roundMoney = (value: number): number => Math.round(value * 100) / 100;
+
 // Generate unique prescription number
 const generatePrescriptionNumber = async (): Promise<string> => {
   const today = new Date();
@@ -141,7 +150,8 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Verify all medicines exist and calculate total amount
+    // Verify all medicines exist and calculate the amount for all physical
+    // units that will be handed to the patient at dispense time.
     let totalAmount = 0;
     for (const item of validatedData.items) {
       const medicine = await prisma.medicineCatalog.findUnique({
@@ -155,9 +165,9 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
           message: `Medicine not found: ${item.medicineId}`,
         });
       }
-      // Calculate total amount
-      totalAmount += Number(medicine.price) * item.quantity;
+      totalAmount += Number(medicine.price) * computeUnitsToDispenseForLine(item);
     }
+    totalAmount = roundMoney(totalAmount);
     console.log('Calculated total amount:', totalAmount);
 
     // Generate prescription number
@@ -223,6 +233,7 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
           select: {
             id: true,
             name: true,
+            age: true,
             dateOfBirth: true,
             gender: true,
           },
@@ -387,6 +398,7 @@ export const getPrescriptions = async (req: AuthRequest, res: Response) => {
             select: {
               id: true,
               name: true,
+              age: true,
               dateOfBirth: true,
               gender: true,
               phone: true,
@@ -452,6 +464,7 @@ export const getPrescriptionById = async (req: AuthRequest, res: Response) => {
           select: {
             id: true,
             name: true,
+            age: true,
             dateOfBirth: true,
             gender: true,
             phone: true,
@@ -595,7 +608,7 @@ export const dispensePrescription = async (req: AuthRequest, res: Response) => {
     const medicineIds = [...requiredByMedicine.keys()];
     const catalogRows = await prisma.medicineCatalog.findMany({
       where: { id: { in: medicineIds } },
-      select: { id: true, name: true, stockQuantity: true },
+      select: { id: true, name: true, stockQuantity: true, price: true },
     });
 
     if (catalogRows.length !== medicineIds.length) {
@@ -619,6 +632,15 @@ export const dispensePrescription = async (req: AuthRequest, res: Response) => {
         details: shortages,
       });
     }
+
+    const catalogById = new Map(catalogRows.map((medicine) => [medicine.id, medicine]));
+    const dispensedTotal = roundMoney(
+      lineDispense.reduce(
+        (total, line) =>
+          total + Number(catalogById.get(line.medicineId)?.price ?? 0) * line.units,
+        0,
+      ),
+    );
 
     const prescription = await prisma.$transaction(async (tx) => {
       for (const [medicineId, need] of requiredByMedicine) {
@@ -649,6 +671,7 @@ export const dispensePrescription = async (req: AuthRequest, res: Response) => {
           isDispensed: true,
           dispensedAt: new Date(),
           dispensedBy: userId,
+          totalAmount: dispensedTotal,
           notes: notes || existingPrescription.prescriptionNumber + ' dispensed',
         },
         include: {
@@ -656,6 +679,7 @@ export const dispensePrescription = async (req: AuthRequest, res: Response) => {
             select: {
               id: true,
               name: true,
+              age: true,
               dateOfBirth: true,
               gender: true,
             },
@@ -779,6 +803,7 @@ export const cancelPrescription = async (req: AuthRequest, res: Response) => {
       where: { id },
       data: {
         status: PrescriptionStatus.CANCELLED,
+        isDispensed: false,
         notes: `${existingPrescription.prescriptionNumber} cancelled - Reason: ${reason}`,
       },
       include: {
@@ -786,6 +811,7 @@ export const cancelPrescription = async (req: AuthRequest, res: Response) => {
           select: {
             id: true,
             name: true,
+            age: true,
             dateOfBirth: true,
             gender: true,
           },
@@ -894,6 +920,156 @@ export const deletePrescription = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getPrescriptionInventoryAudit = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const prescription = await prisma.prescription.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        prescriptionNumber: true,
+        status: true,
+        patient: { select: { id: true, name: true } },
+        prescriptionItems: {
+          orderBy: { rowOrder: 'asc' },
+          select: {
+            id: true,
+            quantity: true,
+            frequency: true,
+            duration: true,
+            dosage: true,
+            medicine: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                stockQuantity: true,
+                isActive: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!prescription) {
+      return res.status(404).json({ success: false, message: 'Prescription not found' });
+    }
+
+    const items = prescription.prescriptionItems.map((item) => {
+      const requiredUnits = computeUnitsToDispenseForLine(item);
+      const availableUnits = item.medicine.stockQuantity;
+      return {
+        prescriptionItemId: item.id,
+        medicineId: item.medicine.id,
+        medicineCode: item.medicine.code,
+        medicineName: item.medicine.name,
+        dosage: item.dosage,
+        frequency: item.frequency,
+        duration: item.duration,
+        quantityPerDose: item.quantity,
+        requiredUnits,
+        availableUnits,
+        shortageUnits: Math.max(0, requiredUnits - availableUnits),
+        isAvailable: item.medicine.isActive && availableUnits >= requiredUnits,
+        isActive: item.medicine.isActive,
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        audit: {
+          prescriptionId: prescription.id,
+          prescriptionNumber: prescription.prescriptionNumber,
+          prescriptionStatus: prescription.status,
+          patient: prescription.patient,
+          canDispense: items.length > 0 && items.every((item) => item.isAvailable),
+          items,
+          checkedAt: new Date().toISOString(),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Prescription inventory audit error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to check prescription inventory',
+    });
+  }
+};
+
+export const getPrescriptionTemplates = async (req: AuthRequest, res: Response) => {
+  try {
+    const templates = await prisma.prescriptionTemplate.findMany({
+      where: { createdBy: req.user!.id, isActive: true },
+      orderBy: [{ updatedAt: 'desc' }, { name: 'asc' }],
+    });
+    return res.json({ success: true, data: { templates } });
+  } catch (error) {
+    console.error('Get prescription templates error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load templates' });
+  }
+};
+
+export const createPrescriptionTemplate = async (req: AuthRequest, res: Response) => {
+  try {
+    const data = prescriptionTemplateSchema.parse(req.body);
+    const medicineIds = [...new Set(data.templateData.map((item) => item.medicineId))];
+    const medicineCount = await prisma.medicineCatalog.count({
+      where: { id: { in: medicineIds }, isActive: true },
+    });
+    if (medicineCount !== medicineIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'One or more template medicines are missing or inactive',
+      });
+    }
+
+    const template = await prisma.prescriptionTemplate.create({
+      data: {
+        name: data.name,
+        description: data.description || null,
+        templateData: data.templateData,
+        createdBy: req.user!.id,
+      },
+    });
+    return res.status(201).json({ success: true, data: { template } });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.issues,
+      });
+    }
+    if (error?.code === 'P2002') {
+      return res.status(409).json({
+        success: false,
+        message: 'You already have a template with this name',
+      });
+    }
+    console.error('Create prescription template error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to create template' });
+  }
+};
+
+export const deletePrescriptionTemplate = async (req: AuthRequest, res: Response) => {
+  try {
+    const updated = await prisma.prescriptionTemplate.updateMany({
+      where: { id: req.params.id, createdBy: req.user!.id, isActive: true },
+      data: { isActive: false },
+    });
+    if (updated.count !== 1) {
+      return res.status(404).json({ success: false, message: 'Template not found' });
+    }
+    return res.json({ success: true, message: 'Template deleted' });
+  } catch (error) {
+    console.error('Delete prescription template error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to delete template' });
+  }
+};
+
 export const getPrescriptionStats = async (req: AuthRequest, res: Response) => {
   try {
     const startOfDay = new Date();
@@ -968,7 +1144,7 @@ export const getPendingPrescriptions = async (req: AuthRequest, res: Response) =
       orderBy: { createdAt: 'desc' },
       include: {
         patient: {
-          select: { id: true, name: true, phone: true, gender: true, dateOfBirth: true },
+          select: { id: true, name: true, phone: true, gender: true, age: true, dateOfBirth: true },
         },
         doctor: {
           select: { id: true, fullName: true, role: true },
