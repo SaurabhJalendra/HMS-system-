@@ -7,13 +7,13 @@ import userService from '../../lib/api/services/userService';
 import auditService from '../../lib/api/services/auditService';
 import configService from '../../lib/api/services/configService';
 import consultationService from '../../lib/api/services/consultationService';
-import PrescriptionTemplates from './PrescriptionTemplates';
 import PrescriptionPDFGenerator from '../../lib/utils/prescriptionPDFGenerator';
-import AuditLogs from '../common/AuditLogs';
+import PrescriptionInventoryAudit from './PrescriptionInventoryAudit';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { calculateAge } from '../../lib/utils/ageCalculator';
+import { UserRole } from '../../lib/api/types';
 
 const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
   const { formatCurrency: formatCurrencyUtil, config: hospitalConfig } = useHospitalConfig();
@@ -31,8 +31,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
   const [totalPages, setTotalPages] = useState(1);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [stats, setStats] = useState(null);
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [showAuditLogs, setShowAuditLogs] = useState(false);
+  const [showInventoryAudit, setShowInventoryAudit] = useState(false);
   const [selectedPrescriptionForAudit, setSelectedPrescriptionForAudit] = useState(null);
 
   const [previewData, setPreviewData] = useState(null);
@@ -144,7 +143,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
 
   const loadDoctors = async () => {
     try {
-      const response = await userService.getUsers({ role: 'DOCTOR', limit: 100 });
+      const response = await userService.getUsers({ role: UserRole.DOCTOR, limit: 100 });
       setDoctors(response.users || []);
     } catch (err) {
       console.error('Error loading doctors:', err);
@@ -166,16 +165,33 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
     }
   };
 
+  const refreshAfterStatusChange = async (updatedPrescription) => {
+    if (updatedPrescription?.id) {
+      setPrescriptions((current) =>
+        current.map((prescription) =>
+          prescription.id === updatedPrescription.id ? updatedPrescription : prescription
+        )
+      );
+    }
+    await Promise.all([loadPrescriptions(), loadStats()]);
+  };
 
   const handleDispensePrescription = async (prescriptionId) => {
     if (window.confirm('Are you sure you want to dispense this prescription?')) {
       try {
-        await prescriptionService.dispensePrescription(prescriptionId);
+        setLoading(true);
+        setError('');
+        const response = await prescriptionService.dispensePrescription(prescriptionId);
         setSuccess('✅ Prescription dispensed successfully!');
-        await loadPrescriptions();
+        await refreshAfterStatusChange(response.prescription);
       } catch (err) {
-        setError('❌ Failed to dispense prescription');
+        setError(
+          '❌ Failed to dispense prescription: ' +
+            (err.response?.data?.message || err.message || 'Unknown error')
+        );
         console.error('Error dispensing prescription:', err);
+      } finally {
+        setLoading(false);
       }
     }
   };
@@ -192,7 +208,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
         console.log('Cancel response:', response);
         
         setSuccess('✅ Prescription cancelled successfully!');
-        await loadPrescriptions();
+        await refreshAfterStatusChange(response.prescription);
         
         // Auto-hide success message after 3 seconds
         setTimeout(() => setSuccess(''), 3000);
@@ -242,14 +258,6 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
   };
 
 
-  const handleSelectTemplate = (template) => {
-    setShowTemplates(false);
-    setSuccess(
-      `Template "${template.name}" is a reference only. Create prescriptions from OPD Flow (Prescription step) for a patient visit.`
-    );
-    setTimeout(() => setSuccess(''), 6000);
-  };
-
   const handlePrintPrescription = async (prescriptionId) => {
     try {
       setLoading(true);
@@ -286,9 +294,6 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
             } else if (historyResponse.consultations && Array.isArray(historyResponse.consultations)) {
               // If response has consultations property (paginated response)
               consultations = historyResponse.consultations;
-            } else if (historyResponse.data && Array.isArray(historyResponse.data)) {
-              // If response has data property
-              consultations = historyResponse.data;
             }
           }
           
@@ -313,7 +318,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
             .sort((a, b) => {
               const dateA = new Date(a.consultationDate || a.createdAt || 0);
               const dateB = new Date(b.consultationDate || b.createdAt || 0);
-              return dateB - dateA;
+              return dateB.getTime() - dateA.getTime();
             })
             .slice(0, 10);
           
@@ -369,7 +374,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
         patient: {
           id: prescription.patient?.id || 'N/A',
           name: prescription.patient?.name || 'N/A',
-          age: prescription.patient?.age || '',
+          age: prescription.patient?.age ?? '',
           gender: prescription.patient?.gender || 'M',
           phone: prescription.patient?.phone || 'N/A',
           address: prescription.patient?.address || 'N/A',
@@ -464,7 +469,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
 
   const handleViewAuditLogs = (prescriptionId) => {
     setSelectedPrescriptionForAudit(prescriptionId);
-    setShowAuditLogs(true);
+    setShowInventoryAudit(true);
   };
 
   const handleViewPrescription = async (prescriptionId) => {
@@ -477,7 +482,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
       console.log('Prescription response:', response);
       
       // The response contains a 'prescription' property
-      const prescription = response.prescription || response;
+      const prescription = response.prescription;
       console.log('Prescription data:', prescription);
       
       if (!prescription) {
@@ -544,8 +549,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
           React.createElement('option', { value: '' }, 'All Statuses'),
           React.createElement('option', { value: 'ACTIVE' }, 'Active'),
           React.createElement('option', { value: 'DISPENSED' }, 'Dispensed'),
-          React.createElement('option', { value: 'CANCELLED' }, 'Cancelled'),
-          React.createElement('option', { value: 'EXPIRED' }, 'Expired')
+          React.createElement('option', { value: 'CANCELLED' }, 'Cancelled')
         ),
         React.createElement(
           'button',
@@ -576,16 +580,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
       React.createElement(
         'div',
         { style: { display: 'flex', gap: '8px', marginBottom: '8px' } },
-        React.createElement(
-          'button',
-          {
-            onClick: () => setShowTemplates(true),
-            className: 'px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center'
-          },
-          React.createElement('span', { className: 'mr-2' }, '📋'),
-          'Templates'
-        ),
-        React.createElement(
+        user?.role !== 'PHARMACY' && React.createElement(
           'button',
           {
             onClick: handleExportPrescriptions,
@@ -683,7 +678,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
                       },
                       'Print'
                     ),
-                    React.createElement(
+                    (user?.role === 'PHARMACY' || user?.role === 'ADMIN') && React.createElement(
                       'button',
                       {
                         onClick: () => handleViewAuditLogs(prescription.id),
@@ -691,7 +686,8 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
                       },
                       'Audit'
                     ),
-                    prescription.status === 'ACTIVE' && React.createElement(
+                    prescription.status === 'ACTIVE' &&
+                      (user?.role === 'PHARMACY' || user?.role === 'ADMIN') && React.createElement(
                       'button',
                       {
                         onClick: () => handleDispensePrescription(prescription.id),
@@ -699,7 +695,8 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
                       },
                       'Dispense'
                     ),
-                    prescription.status === 'ACTIVE' && React.createElement(
+                    prescription.status === 'ACTIVE' &&
+                      ['PHARMACY', 'DOCTOR', 'ADMIN'].includes(user?.role) && React.createElement(
                       'button',
                       {
                         onClick: () => handleCancelPrescription(prescription.id),
@@ -799,7 +796,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
               'div',
               { className: 'grid grid-cols-2 gap-4' },
               React.createElement('p', { className: 'text-gray-600' }, `Name: ${previewData?.patient?.name || 'N/A'}`),
-              React.createElement('p', { className: 'text-gray-600' }, `Age: ${previewData?.patient?.age || 'N/A'} years`),
+              React.createElement('p', { className: 'text-gray-600' }, `Age: ${previewData?.patient?.age ?? 'N/A'} years`),
               React.createElement('p', { className: 'text-gray-600' }, `Gender: ${previewData?.patient?.gender || 'N/A'}`),
               React.createElement('p', { className: 'text-gray-600' }, `Phone: ${previewData?.patient?.phone || 'N/A'}`)
             )
@@ -1074,22 +1071,13 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
       // Preview modal
       renderPreviewModal(),
 
-      // Templates modal
-      showTemplates && React.createElement(
-        PrescriptionTemplates,
-        {
-          onSelectTemplate: handleSelectTemplate,
-          onClose: () => setShowTemplates(false)
-        }
-      ),
-
-      // Audit logs modal
-      showAuditLogs && React.createElement(
-        AuditLogs,
+      // Medicine inventory audit modal
+      showInventoryAudit && React.createElement(
+        PrescriptionInventoryAudit,
         {
           prescriptionId: selectedPrescriptionForAudit,
           onClose: () => {
-            setShowAuditLogs(false);
+            setShowInventoryAudit(false);
             setSelectedPrescriptionForAudit(null);
           }
         }

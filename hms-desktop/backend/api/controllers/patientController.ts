@@ -156,10 +156,12 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Prepare patient data (remove age field, use dateOfBirth; normalize empty ID strings to undefined)
+    // Store the entered age as the source shown throughout the application.
+    // dateOfBirth remains populated for compatibility with existing clinical records.
     const { age, ...patientData } = validatedData;
     const finalPatientData = {
       ...patientData,
+      age: age ?? calculateAge(dateOfBirth),
       dateOfBirth,
       aadharCardNumber: patientData.aadharCardNumber?.trim() || undefined,
       passportNumber: patientData.passportNumber?.trim() || undefined,
@@ -322,6 +324,7 @@ export const getPatients = async (req: AuthRequest, res: Response) => {
           id: true,
           name: true,
           patientNumber: true,
+          age: true,
           dateOfBirth: true,
           gender: true,
           phone: true,
@@ -343,16 +346,10 @@ export const getPatients = async (req: AuthRequest, res: Response) => {
 
     const totalPages = Math.ceil(total / limit);
 
-    // Add calculated age to each patient
-    const patientsWithAge = patients.map(patient => ({
-      ...patient,
-      age: calculateAge(patient.dateOfBirth),
-    }));
-
     res.json({
       success: true,
       data: {
-        patients: patientsWithAge,
+        patients,
         pagination: {
           currentPage: page,
           totalPages,
@@ -437,10 +434,7 @@ export const getPatientById = async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       data: {
-        patient: {
-          ...patient,
-          age: calculateAge(patient.dateOfBirth),
-        },
+        patient,
       },
     });
   } catch (error) {
@@ -470,11 +464,13 @@ export const updatePatient = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Convert age to dateOfBirth if age is provided but dateOfBirth is not
+    // Keep the compatibility dateOfBirth in sync when age is edited, while
+    // preserving the exact age entered by the user in the patient row.
     let updateData: any = { ...validatedData };
     if (validatedData.age !== undefined && !validatedData.dateOfBirth) {
       updateData.dateOfBirth = ageToDateOfBirth(validatedData.age);
-      delete updateData.age; // Remove age field
+    } else if (validatedData.dateOfBirth && validatedData.age === undefined) {
+      updateData.age = calculateAge(validatedData.dateOfBirth);
     }
 
     // Check for duplicate phone number if phone is being updated
@@ -695,6 +691,7 @@ export const searchPatientByPhone = async (req: AuthRequest, res: Response) => {
       select: {
         id: true,
         name: true,
+        age: true,
         dateOfBirth: true,
         gender: true,
         phone: true,
@@ -710,10 +707,7 @@ export const searchPatientByPhone = async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       data: {
-        patients: patients.map((patient) => ({
-          ...patient,
-          age: calculateAge(patient.dateOfBirth),
-        })),
+        patients,
       },
     });
   } catch (error) {
@@ -740,9 +734,8 @@ export const getPatientStats = async (req: AuthRequest, res: Response) => {
         _count: { gender: true },
       }),
       prisma.patient.findMany({
-        select: { dateOfBirth: true },
+        select: { age: true },
       }).then(patients => {
-        // Calculate age groups from dateOfBirth
         const ageGroups: Record<string, number> = {
           'Under 18': 0,
           '18-30': 0,
@@ -752,7 +745,7 @@ export const getPatientStats = async (req: AuthRequest, res: Response) => {
         };
         
         patients.forEach(patient => {
-          const age = calculateAge(patient.dateOfBirth);
+          const age = patient.age;
           if (age < 18) {
             ageGroups['Under 18']++;
           } else if (age <= 30) {

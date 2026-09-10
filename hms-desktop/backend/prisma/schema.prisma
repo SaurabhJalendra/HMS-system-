@@ -49,6 +49,7 @@ model User {
   dischargeSummaries    DischargeSummary[]        @relation("DischargeSummaries")
   medicineOrders        MedicineOrder[]
   technicianSelections  TechnicianTestSelection[]
+  prescriptionTemplates PrescriptionTemplate[]
 
   // OT Relations
   surgeriesAsSurgeon   Surgery[]       @relation("SurgeonSurgeries")
@@ -182,6 +183,7 @@ model MedicineCatalog {
 model Patient {
   id                    String      @id // No default: set explicitly on create (name_last4 format)
   name                  String
+  age                   Int
   dateOfBirth           DateTime    @map("date_of_birth")
   gender                Gender
   phone                 String      @unique
@@ -956,6 +958,24 @@ model PrescriptionAudit {
   notes          String?
 
   @@map("prescription_audit")
+}
+
+// Reusable medicine sets saved by a doctor while writing an OPD prescription.
+model PrescriptionTemplate {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  templateData Json     @map("template_data")
+  createdBy    String   @map("created_by")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  creator User @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@unique([createdBy, name])
+  @@index([createdBy, isActive])
+  @@map("prescription_templates")
 }
 
 // Enhanced Medicine Module - New Tables

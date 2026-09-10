@@ -264,6 +264,8 @@ export interface User {
   role: UserRole;
   email?: string | null;
   phone?: string | null;
+  qualifications?: string | null;
+  registrationNumber?: string | null;
   /** Personal OPD fee (INR). Null = hospital default. */
   consultationFee?: number | string | null;
   isActive: boolean;
@@ -300,6 +302,7 @@ export interface Patient {
   id: string;
   name: string;
   age: number;
+  dateOfBirth?: string;
   gender: Gender;
   phone: string;
   aadharCardNumber?: string; // Indian patients: 16-digit Aadhar
@@ -383,6 +386,9 @@ export interface Consultation {
   doctorId: string;
   diagnosis: string;
   notes?: string;
+  temperature?: number | string | null;
+  bloodPressure?: string | null;
+  followUpDate?: string | null;
   /** OPD consultation fee snapshotted at create (doctor fee, else hospital default). */
   fee?: number | string;
   consultationDate: string;
@@ -443,6 +449,9 @@ export interface Prescription {
   doctor?: User;
   appointment?: Appointment;
   consultation?: Consultation;
+  prescriptionNumber?: string;
+  prescriptionItems?: any[];
+  notes?: string;
 }
 
 export interface CreatePrescriptionRequest {
@@ -648,7 +657,8 @@ export interface UpdatePrescriptionRequest {
 export interface PrescriptionSearchParams {
   patientId?: string;
   doctorId?: string;
-  status?: PrescriptionStatus;
+  status?: PrescriptionStatus | string;
+  search?: string;
   page?: number;
   limit?: number;
 }

@@ -9,8 +9,12 @@ import {
   dispensePrescription,
   cancelPrescription,
   deletePrescription,
+  getPrescriptionInventoryAudit,
   getPrescriptionStats,
   getPendingPrescriptions,
+  getPrescriptionTemplates,
+  createPrescriptionTemplate,
+  deletePrescriptionTemplate,
 } from '../controllers/prescriptionController';
 
 const router = Router();
@@ -47,6 +51,18 @@ router.get('/pending', requireRole(UserRole.PHARMACY, UserRole.ADMIN), getPendin
 // @access  Private (Admin, Doctor, Pharmacy)
 router.get('/stats', requireRole(UserRole.ADMIN, UserRole.DOCTOR, UserRole.PHARMACY), getPrescriptionStats);
 
+// Doctor-owned reusable templates for the OPD prescription writer
+router.get('/templates', requireRole(UserRole.DOCTOR, UserRole.ADMIN), getPrescriptionTemplates);
+router.post('/templates', requireRole(UserRole.DOCTOR, UserRole.ADMIN), createPrescriptionTemplate);
+router.delete('/templates/:id', requireRole(UserRole.DOCTOR, UserRole.ADMIN), deletePrescriptionTemplate);
+
+// Pharmacy stock check for every line in a prescription
+router.get(
+  '/:id/inventory-audit',
+  requireRole(UserRole.PHARMACY, UserRole.ADMIN),
+  getPrescriptionInventoryAudit,
+);
+
 // @route   GET /api/prescriptions/:id
 // @desc    Get prescription by ID
 // @access  Private (Doctor, Admin, Pharmacy, Receptionist)
@@ -64,8 +80,12 @@ router.post('/:id/dispense', requireRole(UserRole.PHARMACY, UserRole.ADMIN), dis
 
 // @route   POST /api/prescriptions/:id/cancel
 // @desc    Cancel prescription
-// @access  Private (Doctor, Admin)
-router.post('/:id/cancel', requireRole(UserRole.DOCTOR, UserRole.ADMIN), cancelPrescription);
+// @access  Private (Doctor, Pharmacy, Admin)
+router.post(
+  '/:id/cancel',
+  requireRole(UserRole.DOCTOR, UserRole.PHARMACY, UserRole.ADMIN),
+  cancelPrescription,
+);
 
 // @route   DELETE /api/prescriptions/:id
 // @desc    Delete prescription (permanently remove from database)

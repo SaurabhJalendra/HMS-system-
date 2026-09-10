@@ -1,6 +1,6 @@
 /**
  * Recalculate prescription.totalAmount from prescription line items:
- * sum(medicine_catalog.price * quantity) per item (same rule as createPrescription).
+ * sum(medicine_catalog.price * physical dispense units) per item.
  *
  * Use after fixing stats revenue, or when older rows have total_amount = 0.
  *
@@ -14,6 +14,7 @@
  * Note: Uses current medicine catalog prices, not historical prices at issue time.
  */
 import { PrismaClient, PrescriptionStatus } from '@prisma/client';
+import { computeUnitsToDispenseForLine } from '../utils/prescriptionDispenseUnits';
 
 const prisma = new PrismaClient();
 
@@ -52,7 +53,7 @@ async function main() {
         missingMedicine++;
         continue;
       }
-      total += Number(item.medicine.price) * item.quantity;
+      total += Number(item.medicine.price) * computeUnitsToDispenseForLine(item);
     }
     total = roundMoney(total);
 

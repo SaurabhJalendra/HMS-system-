@@ -1,10 +1,10 @@
 {
-  "version": "1.0.10",
-  "backendVersion": "1.0.10",
+  "version": "1.0.11",
+  "backendVersion": "1.0.11",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.10",
+  "latestDesktopVersion": "1.0.11",
   "releaseNotes": [
-    "update the opd module for age and all other things."
+    "Fix pharmacy prescription actions, statistics, patient age, inventory audit, and OPD templates"
   ],
-  "publishedAt": "2026-09-09T09:01:32.431Z"
+  "publishedAt": "2026-09-10T08:43:23.380Z"
 }
