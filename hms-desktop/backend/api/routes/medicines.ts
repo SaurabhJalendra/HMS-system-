@@ -38,13 +38,9 @@ router.post(
   requireRole(UserRole.ADMIN, UserRole.PHARMACY),
   reconcileStockFromDispensedPrescriptions,
 );
-router.get('/', requireRole(UserRole.ADMIN, UserRole.PHARMACY, UserRole.DOCTOR), getMedicines);
-router.get('/:id', requireRole(UserRole.ADMIN, UserRole.PHARMACY, UserRole.DOCTOR), getMedicineById);
-router.put('/:id', requireRole(UserRole.ADMIN, UserRole.PHARMACY), updateMedicine);
-router.patch('/:id/stock', requireRole(UserRole.ADMIN, UserRole.PHARMACY), updateMedicineStock);
-router.delete('/:id', requireRole(UserRole.ADMIN, UserRole.PHARMACY), deleteMedicine);
 
-// Enhanced functionality routes
+// Specific routes must be registered before /:id so "orders", "suppliers",
+// and "import" are never interpreted as medicine IDs.
 router.post('/import', requireRole(UserRole.ADMIN, UserRole.PHARMACY), upload.single('file'), importMedicineCatalog);
 router.post('/orders', requireRole(UserRole.ADMIN, UserRole.PHARMACY), createMedicineOrder);
 router.get('/orders', requireRole(UserRole.ADMIN, UserRole.PHARMACY), getMedicineOrders);
@@ -55,5 +51,11 @@ router.post('/orders/:orderId/invoice', requireRole(UserRole.ADMIN, UserRole.PHA
 // Supplier management routes
 router.get('/suppliers', requireRole(UserRole.ADMIN, UserRole.PHARMACY), getSuppliers);
 router.post('/suppliers', requireRole(UserRole.ADMIN, UserRole.PHARMACY), createSupplier);
+
+router.get('/', requireRole(UserRole.ADMIN, UserRole.PHARMACY, UserRole.DOCTOR), getMedicines);
+router.get('/:id', requireRole(UserRole.ADMIN, UserRole.PHARMACY, UserRole.DOCTOR), getMedicineById);
+router.put('/:id', requireRole(UserRole.ADMIN, UserRole.PHARMACY), updateMedicine);
+router.patch('/:id/stock', requireRole(UserRole.ADMIN, UserRole.PHARMACY), updateMedicineStock);
+router.delete('/:id', requireRole(UserRole.ADMIN, UserRole.PHARMACY), deleteMedicine);
 
 export { router as medicineRoutes };

@@ -10,20 +10,15 @@ const ImportCatalogWizard = ({ onBack, onSuccess, user, isAuthenticated }) => {
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
-      const allowedTypes = [
-        'application/pdf',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.ms-excel',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      ];
+      const extension = selectedFile.name.toLowerCase().split('.').pop();
       
-      if (allowedTypes.includes(selectedFile.type)) {
+      if (['xlsx', 'xls'].includes(extension || '')) {
         setFile(selectedFile);
         setError('');
       } else {
-        setError('Please select a valid file (PDF, Excel, or Word document)');
+        setError('Only Excel files (.xlsx or .xls) are accepted.');
         setFile(null);
+        e.target.value = '';
       }
     }
   };
@@ -123,7 +118,7 @@ const ImportCatalogWizard = ({ onBack, onSuccess, user, isAuthenticated }) => {
         React.createElement(
           'p',
           { className: 'text-gray-600 mt-2' },
-          'Upload a file containing medicine information to bulk import medicines into the system.'
+          'Upload an Excel file containing medicine information to bulk import medicines into the system.'
         )
       ),
 
@@ -151,7 +146,7 @@ const ImportCatalogWizard = ({ onBack, onSuccess, user, isAuthenticated }) => {
                 {
                   type: 'file',
                   onChange: handleFileChange,
-                  accept: '.pdf,.xlsx,.xls,.doc,.docx',
+                  accept: '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel',
                   className: 'hidden',
                   id: 'file-upload'
                 }
@@ -191,7 +186,7 @@ const ImportCatalogWizard = ({ onBack, onSuccess, user, isAuthenticated }) => {
                   React.createElement(
                     'p',
                     { className: 'text-xs text-gray-400 mt-1' },
-                    'PDF, Excel, or Word documents up to 10MB'
+                    'Excel (.xlsx or .xls) only, up to 10MB'
                   )
                 )
               )
@@ -210,18 +205,17 @@ const ImportCatalogWizard = ({ onBack, onSuccess, user, isAuthenticated }) => {
             React.createElement(
               'div',
               { className: 'text-sm text-blue-700' },
-              React.createElement('p', { className: 'mb-1' }, 'For Excel files, include these columns:'),
+              React.createElement('p', { className: 'mb-2 font-medium' }, 'Required Excel columns (they may appear in any order):'),
               React.createElement('ul', { className: 'list-disc list-inside ml-4' },
                 React.createElement('li', null, 'Medicine Name (required)'),
-                React.createElement('li', null, 'Generic Name'),
-                React.createElement('li', null, 'Manufacturer'),
-                React.createElement('li', null, 'Category'),
-                React.createElement('li', null, 'ATC Code'),
-                React.createElement('li', null, 'Price'),
-                React.createElement('li', null, 'Stock Quantity'),
-                React.createElement('li', null, 'Low Stock Threshold'),
-                React.createElement('li', null, 'Expiry Date')
-              )
+                React.createElement('li', null, 'Generic Name (required)'),
+                React.createElement('li', null, 'Manufacturer (required)'),
+                React.createElement('li', null, 'Category (required)'),
+                React.createElement('li', null, 'Price (required)'),
+                React.createElement('li', null, 'Stock Quantity (required)'),
+                React.createElement('li', null, 'Low Stock Threshold (required)')
+              ),
+              React.createElement('p', { className: 'mt-2' }, 'Optional columns: ATC Code, Therapeutic Class, Expiry Date. Values are mapped by column header, not column position.')
             )
           ),
 

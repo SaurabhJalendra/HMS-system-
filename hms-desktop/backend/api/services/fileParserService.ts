@@ -60,8 +60,30 @@ export class FileParserService {
           .replace(/\s*\(required\)/gi, '') // Remove "(required)"
           .replace(/\s*\(optional\)/gi, '') // Remove "(optional)"
           .replace(/\s*\(.*?\)/g, '') // Remove any other parentheses content
+          .replace(/[_-]+/g, ' ')
+          .replace(/\s+/g, ' ')
           .trim();
       };
+
+      // Column position is intentionally irrelevant: every field is mapped by
+      // its normalized header. Reject incomplete templates before importing.
+      const normalizedHeaders = Object.keys(data[0] as Record<string, unknown>).map(normalizeColumnName);
+      const requiredHeaders = [
+        { label: 'Medicine Name', aliases: ['medicine name', 'name', 'medicine', 'drug name', 'product name'] },
+        { label: 'Generic Name', aliases: ['generic name', 'generic', 'generic name inn'] },
+        { label: 'Manufacturer', aliases: ['manufacturer', 'company', 'company name', 'brand', 'supplier'] },
+        { label: 'Category', aliases: ['category', 'type', 'medicine category', 'drug category', 'class'] },
+        { label: 'Price', aliases: ['price', 'cost', 'unit price', 'selling price', 'mrp'] },
+        { label: 'Stock Quantity', aliases: ['quantity', 'stock', 'stock quantity', 'available stock', 'qty', 'units'] },
+        { label: 'Low Stock Threshold', aliases: ['low stock threshold', 'threshold', 'minimum stock', 'reorder level'] },
+      ];
+      const missingHeaders = requiredHeaders
+        .filter(({ aliases }) => !aliases.some((alias) => normalizedHeaders.includes(normalizeColumnName(alias))))
+        .map(({ label }) => label);
+
+      if (missingHeaders.length > 0) {
+        throw new Error(`Missing required column(s): ${missingHeaders.join(', ')}`);
+      }
 
       // Helper function to find column value (case-insensitive, handles various formats)
       const getColumnValue = (row: any, ...possibleNames: string[]): string => {

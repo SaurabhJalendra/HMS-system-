@@ -3,7 +3,7 @@ import medicineService from '../../lib/api/services/medicineService';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
 
-const OrderManagement = ({ onBack }) => {
+const OrderManagement = ({ onBack, onInventoryChanged }) => {
   const { formatCurrency, formatDate: formatDateUtil } = useHospitalConfig();
   const [activeTab, setActiveTab] = useState('orders'); // 'orders', 'new-order', 'suppliers'
   const [orders, setOrders] = useState([]);
@@ -140,10 +140,23 @@ const OrderManagement = ({ onBack }) => {
     }
   };
 
-  const handleAddOrderItem = () => {
+  const handleAddOrderItem = (source) => {
     setNewOrder(prev => ({
       ...prev,
-      orderItems: [...prev.orderItems, { medicineId: '', quantity: 1, unitPrice: 0 }]
+      orderItems: [...prev.orderItems, {
+        source,
+        medicineId: '',
+        quantity: 1,
+        unitPrice: 0,
+        newMedicine: source === 'new' ? {
+          name: '',
+          genericName: '',
+          manufacturer: '',
+          category: '',
+          code: '',
+          lowStockThreshold: 10
+        } : undefined
+      }]
     }));
   };
 
@@ -152,6 +165,17 @@ const OrderManagement = ({ onBack }) => {
       ...prev,
       orderItems: prev.orderItems.map((item, i) => 
         i === index ? { ...item, [field]: value } : item
+      )
+    }));
+  };
+
+  const handleNewMedicineChange = (index, field, value) => {
+    setNewOrder(prev => ({
+      ...prev,
+      orderItems: prev.orderItems.map((item, itemIndex) =>
+        itemIndex === index
+          ? { ...item, newMedicine: { ...item.newMedicine, [field]: value } }
+          : item
       )
     }));
   };
@@ -230,8 +254,39 @@ ${itemsList}
     }
   };
 
+  const handleMarkDelivered = async (order) => {
+    if (!window.confirm(`Mark order ${order.orderNumber} as delivered and add all ordered quantities to inventory?`)) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await medicineService.updateOrderStatus(order.id, {
+        status: 'DELIVERED',
+        actualDelivery: new Date().toISOString()
+      });
+      if (!response.success) {
+        setError(response.message || 'Failed to mark order as delivered');
+        return;
+      }
+      setSuccess('Order marked as delivered and inventory stock updated.');
+      await loadData();
+      await onInventoryChanged?.();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to mark order as delivered');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCreateSupplier = async (e) => {
     e.preventDefault();
+    if (!newSupplier.gstNumber.trim()) {
+      setError('GST number is required');
+      return;
+    }
     setLoading(true);
     setError('');
     setSuccess('');
@@ -351,10 +406,19 @@ ${itemsList}
                   React.createElement(
                     'button',
                     {
-                      className: 'text-blue-600 hover:text-blue-900 cursor-pointer',
+                      className: 'text-blue-600 hover:text-blue-900 cursor-pointer mr-3',
                       onClick: () => handleViewOrder(order.id)
                     },
                     'View'
+                  ),
+                  !['DELIVERED', 'CANCELLED'].includes(order.status) && React.createElement(
+                    'button',
+                    {
+                      className: 'text-green-700 hover:text-green-900 cursor-pointer disabled:opacity-50',
+                      onClick: () => handleMarkDelivered(order),
+                      disabled: loading
+                    },
+                    'Mark Delivered'
                   )
                 )
               ))
@@ -460,13 +524,26 @@ ${itemsList}
               'Order Items'
             ),
             React.createElement(
-              'button',
-              {
-                type: 'button',
-                onClick: handleAddOrderItem,
-                className: 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700'
-              },
-              '+ Add Item'
+              'div',
+              { className: 'flex gap-2' },
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => handleAddOrderItem('inventory'),
+                  className: 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700'
+                },
+                '+ Select from Inventory'
+              ),
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => handleAddOrderItem('new'),
+                  className: 'px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700'
+                },
+                '+ Add a New Item'
+              )
             )
           ),
           newOrder.orderItems.length === 0 ? React.createElement(
@@ -478,14 +555,14 @@ ${itemsList}
             { className: 'space-y-4' },
             ...newOrder.orderItems.map((item, index) => React.createElement(
               'div',
-              { key: index, className: 'flex space-x-4 items-end' },
-              React.createElement(
+              { key: index, className: 'grid grid-cols-1 md:grid-cols-4 gap-4 items-end border border-gray-200 rounded-lg p-4' },
+              item.source === 'inventory' && React.createElement(
                 'div',
-                { className: 'flex-1' },
+                { className: 'md:col-span-2' },
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2' },
-                  'Medicine'
+                  'Select from Inventory *'
                 ),
                 React.createElement(
                   'select',
@@ -503,9 +580,37 @@ ${itemsList}
                   ))
                 )
               ),
+              item.source === 'new' && React.createElement(
+                React.Fragment,
+                null,
+                ...[
+                  ['name', 'Medicine Name *', 'text'],
+                  ['genericName', 'Generic Name *', 'text'],
+                  ['manufacturer', 'Manufacturer *', 'text'],
+                  ['category', 'Category *', 'text'],
+                  ['code', 'Medicine Code', 'text'],
+                  ['lowStockThreshold', 'Low Stock Alert *', 'number']
+                ].map(([field, label, type]) => React.createElement(
+                  'div',
+                  { key: field },
+                  React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, label),
+                  React.createElement('input', {
+                    type,
+                    min: type === 'number' ? 0 : undefined,
+                    value: item.newMedicine?.[field] ?? '',
+                    onChange: (event) => handleNewMedicineChange(
+                      index,
+                      field,
+                      type === 'number' ? Number(event.target.value) : event.target.value
+                    ),
+                    required: label.endsWith('*'),
+                    className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+                  })
+                ))
+              ),
               React.createElement(
                 'div',
-                { className: 'w-24' },
+                null,
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2' },
@@ -527,7 +632,7 @@ ${itemsList}
               ),
               React.createElement(
                 'div',
-                { className: 'w-32' },
+                null,
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2' },
@@ -537,7 +642,7 @@ ${itemsList}
                   'input',
                   {
                     type: 'number',
-                    min: 0,
+                    min: 0.01,
                     step: 0.01,
                     value: item.unitPrice,
                     onChange: (e) => handleOrderItemChange(index, 'unitPrice', parseFloat(e.target.value)),
@@ -739,14 +844,20 @@ ${itemsList}
               React.createElement(
                 'label',
                 { className: 'block text-sm font-medium text-gray-700 mb-2' },
-                'GST Number'
+                'GST Number *'
               ),
               React.createElement(
                 'input',
                 {
                   type: 'text',
                   value: newSupplier.gstNumber,
-                  onChange: (e) => setNewSupplier(prev => ({ ...prev, gstNumber: e.target.value })),
+                  onChange: (e) => setNewSupplier(prev => ({ ...prev, gstNumber: e.target.value.toUpperCase() })),
+                  required: true,
+                  minLength: 15,
+                  maxLength: 15,
+                  pattern: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]',
+                  title: 'Enter a valid 15-character GSTIN',
+                  placeholder: '22AAAAA0000A1Z5',
                   className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
                 }
               )
