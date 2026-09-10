@@ -93,8 +93,41 @@ class ConfigService {
 
   // ========== HOSPITAL CONFIG ==========
   async getHospitalConfig(): Promise<{ config: HospitalConfig }> {
-    const response = await apiClient.get<ApiResponse<{ config: HospitalConfig }>>('/config/hospital');
-    return response.data.data;
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const response = await apiClient.get<ApiResponse<{ config: HospitalConfig }>>(
+          '/config/hospital',
+          { timeout: 15000 },
+        );
+
+        if (!response.data?.success || !response.data.data) {
+          const responseError: any = new Error(
+            response.data?.message || 'Hospital configuration response was invalid',
+          );
+          responseError.response = response;
+          throw responseError;
+        }
+
+        return response.data.data;
+      } catch (error: any) {
+        const isTransient =
+          error?.code === 'ECONNABORTED' ||
+          error?.code === 'ETIMEDOUT' ||
+          error?.code === 'ERR_NETWORK' ||
+          !error?.response;
+
+        if (!isTransient || attempt === maxAttempts) {
+          throw error;
+        }
+
+        console.warn(`Hospital configuration request failed; retrying (${attempt}/${maxAttempts})...`);
+        await new Promise((resolve) => setTimeout(resolve, 750));
+      }
+    }
+
+    throw new Error('Failed to load hospital configuration');
   }
 
   async updateHospitalConfig(config: Partial<HospitalConfig>): Promise<{ config: HospitalConfig }> {
