@@ -1,10 +1,10 @@
 {
-  "version": "1.0.14",
-  "backendVersion": "1.0.14",
+  "version": "1.0.15",
+  "backendVersion": "1.0.15",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.14",
+  "latestDesktopVersion": "1.0.15",
   "releaseNotes": [
     "Lab Tech dashboard and lab-test actions; password show/hide on login and reset; TypeScript and lint config cleanup"
   ],
-  "publishedAt": "2026-09-11T10:06:41.470Z"
+  "publishedAt": "2026-09-11T10:07:34.907Z"
 }
