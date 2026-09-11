@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PasswordVisibilityIcon from './PasswordVisibilityIcon';
 
 const LoginForm = ({ onLogin, isLoading, logoUrl, hospitalName }: any) => {
   const [formData, setFormData] = useState({
@@ -129,7 +130,7 @@ const LoginForm = ({ onLogin, isLoading, logoUrl, hospitalName }: any) => {
                   color: '#666666'
                 }
               },
-              showPassword ? '🙈' : '👁️'
+              React.createElement(PasswordVisibilityIcon, { visible: showPassword })
             )
           )
         )
