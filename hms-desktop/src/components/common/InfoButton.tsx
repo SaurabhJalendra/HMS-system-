@@ -7,7 +7,15 @@ const InfoButton = ({
   size = "sm",
   variant = "subtle",
   className = "",
-  icon
+  icon = null,
+}: {
+  title?: string;
+  content?: string;
+  position?: string;
+  size?: string;
+  variant?: string;
+  className?: string;
+  icon?: React.ReactNode;
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [computedPosition, setComputedPosition] = useState(position);

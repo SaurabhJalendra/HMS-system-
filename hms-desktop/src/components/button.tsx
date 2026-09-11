@@ -1,7 +1,7 @@
 import React from "react";
 import { cn } from "../lib/utils";
 
-const Button = React.forwardRef(
+const Button = React.forwardRef<HTMLButtonElement, any>(
   ({ className, variant = "default", size = "default", ...props }, ref) => {
     return React.createElement("button", {
       className: cn(

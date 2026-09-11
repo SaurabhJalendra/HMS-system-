@@ -10,6 +10,8 @@ import {
   hasIPDSubModuleAccess,
   getAvailableIPDSubModules,
   roleUsesConsultationFee,
+  getRoleQuickActions,
+  shouldShowAvailableModules,
 } from '../../lib/utils/rolePermissions';
 import { UserRole } from '../../lib/api/types';
 
@@ -146,6 +148,22 @@ describe('Role Permissions', () => {
       const info = getRoleDisplayInfo('UNKNOWN_ROLE' as UserRole);
       expect(info.label).toBe('UNKNOWN_ROLE');
       expect(info.icon).toBe('👤');
+    });
+  });
+
+  describe('Lab technician dashboard', () => {
+    it('should include patients in lab tech quick actions', () => {
+      const actions = getRoleQuickActions(UserRole.LAB_TECH);
+      expect(actions.map((action) => action.module)).toEqual(
+        expect.arrayContaining(['labTests', 'patients'])
+      );
+      expect(actions.some((action) => action.name === 'Patients')).toBe(true);
+    });
+
+    it('should hide available modules for lab technicians', () => {
+      expect(shouldShowAvailableModules(UserRole.LAB_TECH)).toBe(false);
+      expect(shouldShowAvailableModules(UserRole.ADMIN)).toBe(true);
+      expect(shouldShowAvailableModules(UserRole.DOCTOR)).toBe(true);
     });
   });
 

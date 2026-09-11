@@ -4,7 +4,8 @@ import {
   getRoleDisplayInfo, 
   getRoleQuickActions,
   getRoleDashboardWidgets,
-  hasModuleAccess 
+  hasModuleAccess,
+  shouldShowAvailableModules,
 } from '../../lib/utils/rolePermissions';
 import LoadingSpinner from '../common/LoadingSpinner';
 import InfoButton from '../common/InfoButton';
@@ -20,7 +21,7 @@ import {
   loadPharmacyDashboardData,
 } from '../../lib/utils/roleDashboardData';
 
-const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashboard' }) => {
+const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashboard' }: any) => {
   const [dashboardData, setDashboardData] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -451,8 +452,8 @@ const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashb
       ))
     ),
 
-    // Available Modules (exclude current dashboard)
-    React.createElement(
+    // Available Modules (exclude current dashboard). Lab techs use Quick Actions only.
+    shouldShowAvailableModules(userRole) && React.createElement(
       'div',
       { style: { backgroundColor: '#FFFFFF', border: '1px solid #E5E7EB', padding: '20px', marginBottom: '16px', borderRadius: '8px', boxSizing: 'border-box' } },
       React.createElement(

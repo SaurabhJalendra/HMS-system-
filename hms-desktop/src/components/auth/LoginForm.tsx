@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 
-const LoginForm = ({ onLogin, isLoading, logoUrl, hospitalName }) => {
+const LoginForm = ({ onLogin, isLoading, logoUrl, hospitalName }: any) => {
   const [formData, setFormData] = useState({
     username: '',
     password: ''
   });
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -92,17 +93,44 @@ const LoginForm = ({ onLogin, isLoading, logoUrl, hospitalName }) => {
             'Password'
           ),
           React.createElement(
-            'input',
-            {
-              id: 'password',
-              name: 'password',
-              type: 'password',
-              required: true,
-              value: formData.password,
-              onChange: handleInputChange,
-              style: { width: '100%', padding: '6px 8px', border: '1px solid #C8C8C8', fontSize: '13px', backgroundColor: '#FFFFFF' },
-              placeholder: 'Enter your password'
-            }
+            'div',
+            { style: { position: 'relative' } },
+            React.createElement(
+              'input',
+              {
+                id: 'password',
+                name: 'password',
+                type: showPassword ? 'text' : 'password',
+                required: true,
+                value: formData.password,
+                onChange: handleInputChange,
+                style: { width: '100%', padding: '6px 32px 6px 8px', border: '1px solid #C8C8C8', fontSize: '13px', backgroundColor: '#FFFFFF', boxSizing: 'border-box' },
+                placeholder: 'Enter your password'
+              }
+            ),
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                onClick: () => setShowPassword(!showPassword),
+                'aria-label': showPassword ? 'Hide password' : 'Show password',
+                title: showPassword ? 'Hide password' : 'Show password',
+                style: {
+                  position: 'absolute',
+                  right: '6px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0',
+                  fontSize: '14px',
+                  lineHeight: 1,
+                  color: '#666666'
+                }
+              },
+              showPassword ? '🙈' : '👁️'
+            )
           )
         )
       ),

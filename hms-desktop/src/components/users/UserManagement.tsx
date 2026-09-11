@@ -84,6 +84,8 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
     newPassword: '',
     confirmPassword: ''
   });
+  const [showResetNewPassword, setShowResetNewPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
   const usernameInputRef = useRef(null);
 
   // Get all roles with their display info
@@ -302,6 +304,8 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
       await userService.resetUserPassword(userId, passwordResetData.newPassword);
       setShowPasswordReset(null);
       setPasswordResetData({ newPassword: '', confirmPassword: '' });
+      setShowResetNewPassword(false);
+      setShowResetConfirmPassword(false);
       setSuccessMessage('Password reset successfully');
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
@@ -1114,15 +1118,30 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
               { className: 'block text-sm font-medium text-gray-700' },
               'New Password'
             ),
-            React.createElement('input', {
-              type: 'password',
-              name: 'newPassword',
-              required: true,
-              minLength: 6,
-              value: passwordResetData.newPassword,
-              onChange: handlePasswordResetChange,
-              className: 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
-            })
+            React.createElement(
+              'div',
+              { className: 'relative mt-1' },
+              React.createElement('input', {
+                type: showResetNewPassword ? 'text' : 'password',
+                name: 'newPassword',
+                required: true,
+                minLength: 6,
+                value: passwordResetData.newPassword,
+                onChange: handlePasswordResetChange,
+                className: 'block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+              }),
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => setShowResetNewPassword(!showResetNewPassword),
+                  'aria-label': showResetNewPassword ? 'Hide new password' : 'Show new password',
+                  title: showResetNewPassword ? 'Hide password' : 'Show password',
+                  className: 'absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600'
+                },
+                showResetNewPassword ? '🙈' : '👁️'
+              )
+            )
           ),
           React.createElement(
             'div',
@@ -1132,15 +1151,30 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
               { className: 'block text-sm font-medium text-gray-700' },
               'Confirm Password'
             ),
-            React.createElement('input', {
-              type: 'password',
-              name: 'confirmPassword',
-              required: true,
-              minLength: 6,
-              value: passwordResetData.confirmPassword,
-              onChange: handlePasswordResetChange,
-              className: 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
-            })
+            React.createElement(
+              'div',
+              { className: 'relative mt-1' },
+              React.createElement('input', {
+                type: showResetConfirmPassword ? 'text' : 'password',
+                name: 'confirmPassword',
+                required: true,
+                minLength: 6,
+                value: passwordResetData.confirmPassword,
+                onChange: handlePasswordResetChange,
+                className: 'block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+              }),
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => setShowResetConfirmPassword(!showResetConfirmPassword),
+                  'aria-label': showResetConfirmPassword ? 'Hide confirm password' : 'Show confirm password',
+                  title: showResetConfirmPassword ? 'Hide password' : 'Show password',
+                  className: 'absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600'
+                },
+                showResetConfirmPassword ? '🙈' : '👁️'
+              )
+            )
           ),
           React.createElement(
             'div',
@@ -1159,6 +1193,8 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                 onClick: () => {
                   setShowPasswordReset(null);
                   setPasswordResetData({ newPassword: '', confirmPassword: '' });
+                  setShowResetNewPassword(false);
+                  setShowResetConfirmPassword(false);
                 },
                 className: 'flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500'
               },

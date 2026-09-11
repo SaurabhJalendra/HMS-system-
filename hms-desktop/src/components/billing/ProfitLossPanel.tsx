@@ -97,13 +97,11 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
   useEffect(() => {
     if (!isAdmin) return;
     loadReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, isAdmin]);
 
   useEffect(() => {
     if (!isAdmin) return;
     loadUsersAndSalaries();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salaryMonth, isAdmin]);
 
   const salaryTotal = useMemo(() => {

@@ -1,10 +1,10 @@
 {
-  "version": "1.0.13",
-  "backendVersion": "1.0.13",
+  "version": "1.0.14",
+  "backendVersion": "1.0.14",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.13",
+  "latestDesktopVersion": "1.0.14",
   "releaseNotes": [
-    "Improve hospital configuration loading with automatic timeout retry"
+    "Lab Tech dashboard and lab-test actions; password show/hide on login and reset; TypeScript and lint config cleanup"
   ],
-  "publishedAt": "2026-09-10T11:41:31.522Z"
+  "publishedAt": "2026-09-11T10:06:41.470Z"
 }

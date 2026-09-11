@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const Header = ({ user, onLogout, onToggleSidebar }) => {
+const Header = ({ user, onLogout, onToggleSidebar }: any) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return React.createElement(

@@ -112,7 +112,7 @@ export const getRoleBasedModules = (userRole) => {
   };
 
   const availableModules = getAvailableModules(userRole);
-  const modules = {};
+  const modules: Record<string, { name: string; icon: string; color: string }> = {};
 
   availableModules.forEach(moduleKey => {
     if (allModules[moduleKey]) {
@@ -140,6 +140,10 @@ export const getRoleDisplayInfo = (role) => {
 };
 
 // Get role-specific quick actions
+export const shouldShowAvailableModules = (userRole) => {
+  return userRole !== UserRole.LAB_TECH;
+};
+
 export const getRoleQuickActions = (userRole) => {
   const quickActions = {
     [UserRole.ADMIN]: [
@@ -158,6 +162,7 @@ export const getRoleQuickActions = (userRole) => {
       { name: 'Generate Bill', icon: '💰', action: 'generateBill', module: 'billing' },
     ],
     [UserRole.LAB_TECH]: [
+      { name: 'Patients', icon: '👥', action: 'viewPatients', module: 'patients' },
       { name: 'Pending Tests', icon: '🧪', action: 'pendingTests', module: 'labTests' },
       { name: 'Enter Results', icon: '📝', action: 'enterResults', module: 'labTests' },
       { name: 'Test Reports', icon: '📊', action: 'testReports', module: 'labTests' },
