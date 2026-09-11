@@ -1,6 +1,6 @@
 import React from 'react';
 
-const Sidebar = ({ modules, activeModule, onModuleChange, collapsed, onToggle }) => {
+const Sidebar = ({ modules, activeModule, onModuleChange, collapsed, onToggle }: any) => {
   return React.createElement(
     'div',
     { 

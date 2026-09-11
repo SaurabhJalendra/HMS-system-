@@ -4,7 +4,6 @@ import { persistApiUrl, resolveStartupApiUrl } from '../lib/api/runtimeApiUrl';
 import authService from '../lib/api/services/authService';
 import configService from '../lib/api/services/configService';
 import { hasModuleAccess } from '../lib/utils/rolePermissions';
-import { HospitalConfigProvider } from '../lib/contexts/HospitalConfigContext';
 import { UpdateSessionProvider } from '../lib/contexts/UpdateSessionContext';
 import VersionCompatibilityBanner from './config/VersionCompatibilityBanner';
 import { DesktopUpdateAutoInstaller } from './config/AppUpdatePanel';
@@ -18,7 +17,6 @@ import PrescriptionManagement from './prescriptions/PrescriptionManagement';
 import LabTestManagement from './labTests/LabTestManagement';
 import LoadingSpinner from './common/LoadingSpinner';
 import ConfigurationManagement from './config/ConfigurationManagement';
-import CatalogManagement from './config/CatalogManagement';
 import HospitalSetupWizard from './setup/HospitalSetupWizard';
 import UserOnboardingWizard from './setup/UserOnboardingWizard';
 import InfoButton from './common/InfoButton';
@@ -132,7 +130,6 @@ const App: React.FC = () => {
       }
     }
     // Note: checkSetupState is stable and doesn't need to be in deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setupState]);
 
   const checkSetupState = async (): Promise<void> => {
@@ -392,6 +389,7 @@ const App: React.FC = () => {
         return React.createElement(RoleBasedDashboard, { 
           user, 
           onNavigate: handleNavigation,
+          onLogout: handleLogout,
           currentModule: currentModule
         });
     }

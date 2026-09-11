@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import userService from '../../lib/api/services/userService';
 
-const ChangePasswordModal = ({ isOpen, onClose, onSuccess }) => {
+const ChangePasswordModal = ({ isOpen, onClose, onSuccess }: any) => {
   const [formData, setFormData] = useState({
     currentPassword: '',
     newPassword: '',

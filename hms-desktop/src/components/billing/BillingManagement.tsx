@@ -11,7 +11,7 @@ import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
 import ProfitLossPanel from './ProfitLossPanel';
 
-const BillingManagement = ({ user }) => {
+const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; onBack?: () => void }) => {
   const { formatCurrency, config } = useHospitalConfig();
   const [patients, setPatients] = useState([]);
   const [selectedPatientId, setSelectedPatientId] = useState('');
@@ -430,7 +430,7 @@ const BillingManagement = ({ user }) => {
 
       // Prepare invoice data with section-wise items
       // Application uses INR only
-      const invoiceCurrency = 'INR';
+      const _invoiceCurrency = 'INR';
       
       const invoiceData = {
         hospitalConfig: {

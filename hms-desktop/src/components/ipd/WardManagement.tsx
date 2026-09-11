@@ -4,7 +4,7 @@ import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { formatCurrencySync, getCurrencySymbol } from '../../lib/utils/currencyAndTimezone';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
 
-const WardManagement = ({ onBack, isAuthenticated }) => {
+const WardManagement = ({ onBack: _onBack, isAuthenticated }) => {
   const { displayCurrency } = useHospitalConfig();
   const [wards, setWards] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -46,7 +46,6 @@ const WardManagement = ({ onBack, isAuthenticated }) => {
     } else {
       setError('Please login to access ward management');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, searchTerm, filterType, filterStatus]);
 
   const loadWards = async () => {

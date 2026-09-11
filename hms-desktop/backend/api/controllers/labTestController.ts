@@ -452,6 +452,21 @@ export const updateLabTest = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (validatedData.status === 'CANCELLED') {
+      if (existingLabTest.status === 'COMPLETED') {
+        return res.status(400).json({
+          success: false,
+          message: 'Completed lab tests cannot be cancelled',
+        });
+      }
+      if (existingLabTest.status === 'CANCELLED') {
+        return res.status(400).json({
+          success: false,
+          message: 'Lab test is already cancelled',
+        });
+      }
+    }
+
     // Prepare update data
     const updateData: any = { ...validatedData };
     

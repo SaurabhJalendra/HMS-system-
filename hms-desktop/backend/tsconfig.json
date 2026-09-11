@@ -23,16 +23,15 @@
     "noImplicitOverride": false,
     "noPropertyAccessFromIndexSignature": false,
     "noUncheckedIndexedAccess": false,
-    "baseUrl": "./api",
     "paths": {
-      "@/*": ["*"],
-      "@/controllers/*": ["controllers/*"],
-      "@/middleware/*": ["middleware/*"],
-      "@/models/*": ["models/*"],
-      "@/routes/*": ["routes/*"],
-      "@/services/*": ["services/*"],
-      "@/utils/*": ["utils/*"],
-      "@/types/*": ["types/*"]
+      "@/*": ["./api/*"],
+      "@/controllers/*": ["./api/controllers/*"],
+      "@/middleware/*": ["./api/middleware/*"],
+      "@/models/*": ["./api/models/*"],
+      "@/routes/*": ["./api/routes/*"],
+      "@/services/*": ["./api/services/*"],
+      "@/utils/*": ["./api/utils/*"],
+      "@/types/*": ["./api/types/*"]
     }
   },
   "include": [

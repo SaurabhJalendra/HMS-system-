@@ -7,7 +7,7 @@ import userService from '../../lib/api/services/userService';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
 
-const ConsultationManagement = ({ onBack, user, appointmentData }) => {
+const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { onBack?: any; user?: any; appointmentData?: any; isAuthenticated?: boolean }) => {
   const [consultations, setConsultations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -23,8 +23,8 @@ const ConsultationManagement = ({ onBack, user, appointmentData }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDoctor, setFilterDoctor] = useState('');
   const [filterPatient, setFilterPatient] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [currentPage, _setCurrentPage] = useState(1);
+  const [_totalPages, setTotalPages] = useState(1);
   const [activeTab, setActiveTab] = useState('appointments'); // 'appointments' or 'consultations'
   
   // Form states
@@ -181,8 +181,8 @@ const ConsultationManagement = ({ onBack, user, appointmentData }) => {
 
   const handleConsult = (appointment) => {
     // Pre-fill form with appointment data and open consultation form
-    const patient = appointment.patient || patients.find(p => p.id === appointment.patientId);
-    const doctor = appointment.doctor || doctors.find(d => d.id === appointment.doctorId);
+    const _patient = appointment.patient || patients.find(p => p.id === appointment.patientId);
+    const _doctor = appointment.doctor || doctors.find(d => d.id === appointment.doctorId);
     
     setFormData({
       appointmentId: appointment.id,
@@ -318,7 +318,7 @@ const ConsultationManagement = ({ onBack, user, appointmentData }) => {
     });
   };
 
-  const formatDateWithTime = (dateString) => {
+  const _formatDateWithTime = (dateString) => {
     if (!dateString) return 'N/A';
     const dateObj = new Date(dateString);
     return dateObj.toLocaleDateString('en-US', {

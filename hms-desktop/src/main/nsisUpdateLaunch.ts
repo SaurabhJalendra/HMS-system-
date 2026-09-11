@@ -41,7 +41,7 @@ export function buildHiddenInstallScript(installerPath: string): string {
 export function hiddenHelperSpawnSpec(scriptPath: string): {
   file: string;
   args: string[];
-  options: SpawnOptions;
+  options: SpawnOptions & { windowsCreationFlags?: number };
 } {
   return {
     file: "wscript.exe",

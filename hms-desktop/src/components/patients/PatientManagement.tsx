@@ -6,7 +6,9 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
 import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly } from '../../lib/constants/patientFields';
-const PatientManagement = () => {
+
+const PatientManagement = ({ user }: any = {}) => {
+  const isLabTech = user?.role === 'LAB_TECH';
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -147,7 +149,7 @@ const PatientManagement = () => {
       setSuccess('');
       
       // Send patient data (omit nationality - UI only; backend stores aadharCardNumber and passportNumber)
-      const { nationality, bloodGroupOther, ...rest } = formData;
+      const { nationality: _nationality, bloodGroupOther, ...rest } = formData;
       const ageNumber = parseInt(formData.age, 10);
       if (!formData.age || Number.isNaN(ageNumber) || ageNumber < 0 || ageNumber > 150) {
         setError('Please enter a valid age between 0 and 150');
@@ -528,7 +530,9 @@ const PatientManagement = () => {
         },
         'New patient registration is done in ',
         React.createElement('strong', null, 'OPD Flow'),
-        ' (Register & schedule). Here you can search, view, and edit existing patients.'
+        isLabTech
+          ? '. Here you can search and view existing patients.'
+          : ' (Register & schedule). Here you can search, view, and edit existing patients.'
       ),
 
       // Search Bar
@@ -653,7 +657,7 @@ const PatientManagement = () => {
                   },
                   'View'
                 ),
-                React.createElement(
+                !isLabTech && React.createElement(
                   'button',
                   {
                     onClick: () => handleEdit(patient),

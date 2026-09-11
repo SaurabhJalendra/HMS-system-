@@ -9,8 +9,8 @@ import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { formatCurrencySync, getCurrencySymbol } from '../../lib/utils/currencyAndTimezone';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
 
-const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
-  const { formatCurrency, displayCurrency } = useHospitalConfig();
+const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
+  const { displayCurrency } = useHospitalConfig();
   const [labTests, setLabTests] = useState([]);
   const [testCatalog, setTestCatalog] = useState([]);
   const [patients, setPatients] = useState([]);
@@ -38,7 +38,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
   const [priceEdits, setPriceEdits] = useState({});
   const [techPriceEdits, setTechPriceEdits] = useState({}); // { [testCatalogId]: price } - prices edited during technician selection
   const [dpSelections, setDpSelections] = useState({}); // { [testCatalogId]: { [pointName]: true } }
-  const [expandedTests, setExpandedTests] = useState({}); // UI expand/collapse in selection modal
+  const [_expandedTests, _setExpandedTests] = useState({}); // UI expand/collapse in selection modal
 
   // Form data
   const [formData, setFormData] = useState({
@@ -66,7 +66,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
     try { const s = localStorage.getItem(dpStorageKey(testId)); return s ? JSON.parse(s) : {}; } catch { return {}; }
   };
   const saveDpForTest = (testId, map) => {
-    try { localStorage.setItem(dpStorageKey(testId), JSON.stringify(map || {})); } catch {}
+    try { localStorage.setItem(dpStorageKey(testId), JSON.stringify(map || {})); } catch { /* ignore quota / private mode */ }
   };
   
   // Load/save technician price edits
@@ -90,7 +90,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
       } else {
         localStorage.removeItem(key);
       }
-    } catch {}
+    } catch { /* ignore quota / private mode */ }
   };
 
   useEffect(() => {
@@ -241,7 +241,6 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
       const response = await labTestService.getTechnicianSelectedTests(user.id);
       // Service now returns data directly: { selections, testsByLabType, labTypes }
       const selections = response?.selections || [];
-      const testsByLabType = response?.testsByLabType || {};
       const testIds = selections.map(s => s.testCatalog?.id || s.testCatalogId).filter(Boolean);
       setMySelectedTests(testIds);
       
@@ -562,6 +561,31 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
     setShowAddForm(true);
   };
 
+  const handleCancelTest = async (labTest) => {
+    if (labTest.status === 'COMPLETED' || labTest.status === 'CANCELLED') {
+      return;
+    }
+    const testName = labTest.testNameSnapshot || labTest.testCatalog?.testName || 'this test';
+    const patientName = labTest.patient?.name || patients.find(p => p.id === labTest.patientId)?.name || 'this patient';
+    const confirmed = window.confirm(
+      `Cancel the ordered test "${testName}" for ${patientName}? Use this when the hospital cannot perform the test.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      setLoading(true);
+      setError('');
+      await labTestService.cancelLabTest(labTest.id, 'Cancelled: hospital cannot perform this test');
+      await loadData();
+    } catch (err) {
+      console.error('Error cancelling lab test:', err);
+      setError(err.response?.data?.message || 'Failed to cancel lab test');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Parse reference range to extract data points
   const parseReferenceRange = (referenceRange) => {
     if (!referenceRange) return [];
@@ -573,7 +597,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
     
     parts.forEach(part => {
       // Support section headers like "BLOOD INDICES:" (no value after colon)
-      const headerOnly = part.match(/^([A-Za-z0-9()\s\/\-]+):\s*$/);
+      const headerOnly = part.match(/^([A-Za-z0-9()\s/-]+):\s*$/);
       if (headerOnly) {
         points.push({ type: 'section', name: headerOnly[1].trim() });
         return;
@@ -684,7 +708,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
       if (dpMap && Object.keys(dpMap).length > 0) {
         dataPoints = dataPoints.filter(p => p.type === 'section' || dpMap[p.name]);
       }
-    } catch {}
+    } catch { /* ignore localStorage parse errors */ }
     
     // Initialize data points from existing results if available
     const existingPoints = {};
@@ -843,7 +867,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
           },
           React.createElement('option', { value: '' }, 'All Statuses'),
           React.createElement('option', { value: 'PENDING' }, 'Pending'),
-          React.createElement('option', { value: 'IN_PROGRESS' }, 'In Progress'),
+          user.role !== 'LAB_TECH' && React.createElement('option', { value: 'IN_PROGRESS' }, 'In Progress'),
           React.createElement('option', { value: 'COMPLETED' }, 'Completed'),
           React.createElement('option', { value: 'CANCELLED' }, 'Cancelled')
         ),
@@ -950,12 +974,12 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
                   { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium' },
                   React.createElement(
                     'div',
-                    { style: { display: 'flex', gap: '8px' } },
-                    React.createElement(
+                    { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+                    user.role !== 'LAB_TECH' && React.createElement(
                       'button',
                       {
                         onClick: () => handleEdit(test),
-                        className: 'text-blue-600 hover:text-blue-900 mr-3 cursor-pointer'
+                        className: 'text-blue-600 hover:text-blue-900 cursor-pointer'
                       },
                       'Edit'
                     ),
@@ -963,9 +987,17 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
                       'button',
                       {
                         onClick: () => handleResultEntry(test),
-                        className: 'text-green-600 hover:text-green-900 mr-3 cursor-pointer'
+                        className: 'text-green-600 hover:text-green-900 cursor-pointer'
                       },
                       test.status === 'COMPLETED' ? 'View Results' : 'Enter Results'
+                    ),
+                    (test.status === 'PENDING' || test.status === 'IN_PROGRESS') && (user.role === 'LAB_TECH' || user.role === 'ADMIN') && React.createElement(
+                      'button',
+                      {
+                        onClick: () => handleCancelTest(test),
+                        className: 'text-red-600 hover:text-red-900 cursor-pointer'
+                      },
+                      'Cancel'
                     ),
                     test.status === 'COMPLETED' && test.results && React.createElement(
                       'button',
@@ -1210,7 +1242,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
     // The useEffect will handle syncing main checkboxes based on saved datapoint selections
   };
 
-  const handleClearAllTests = async () => {
+  const _handleClearAllTests = async () => {
     if (!window.confirm('Are you sure you want to clear all your selected tests? This action cannot be undone.')) {
       return;
     }
@@ -2091,9 +2123,6 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }) => {
                             // Remove "result" (case-insensitive)
                             return !p.name || p.name.toLowerCase() !== 'result';
                           });
-                          
-                          // Get only datapoint names (exclude section headers)
-                          const datapointNames = pts.filter(p => p.type !== 'section').map(p => p.name);
                           
                           // Auto-load saved selections if not already loaded
                           if (!dpSelections[test.id] && pts.length > 0) {

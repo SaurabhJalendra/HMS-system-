@@ -428,10 +428,12 @@ export interface HospitalConfig {
   emergencyContact?: string;
   hospitalLicenseNumber?: string;
   taxId?: string;
-  logoUrl?: string;
+  logoUrl?: string | Buffer;
+  logoMimeType?: string;
   timezone: string;
   defaultLanguage: string;
   currency: string;
+  displayCurrency?: string;
   taxRate?: number;
   appointmentSlotDuration: number;
   defaultDoctorConsultationDuration: number;
@@ -440,6 +442,7 @@ export interface HospitalConfig {
   defaultPaymentMode?: PaymentMode;
   enableInsurance: boolean;
   medicineMarkupPercentage?: number;
+  defaultConsultationFee?: number | string | null;
   modulesEnabled?: any;
   labTestsEnabled: boolean;
   ipdEnabled: boolean;
