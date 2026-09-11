@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import authService from '../../lib/api/services/authService';
+import PasswordVisibilityIcon from './PasswordVisibilityIcon';
 
 const ForgotPasswordModal = ({ isOpen, onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
@@ -229,6 +230,8 @@ const ForgotPasswordModal = ({ isOpen, onClose, onSuccess }) => {
                 type: 'button',
                 onClick: () => setShowNewPassword(!showNewPassword),
                 disabled: loading,
+                'aria-label': showNewPassword ? 'Hide new password' : 'Show new password',
+                title: showNewPassword ? 'Hide password' : 'Show password',
                 style: {
                   position: 'absolute',
                   right: '8px',
@@ -245,7 +248,7 @@ const ForgotPasswordModal = ({ isOpen, onClose, onSuccess }) => {
                   justifyContent: 'center'
                 }
               },
-              showNewPassword ? '🙈' : '👁️'
+              React.createElement(PasswordVisibilityIcon, { visible: showNewPassword })
             )
           )
         ),
@@ -285,6 +288,8 @@ const ForgotPasswordModal = ({ isOpen, onClose, onSuccess }) => {
                 type: 'button',
                 onClick: () => setShowConfirmPassword(!showConfirmPassword),
                 disabled: loading,
+                'aria-label': showConfirmPassword ? 'Hide confirm password' : 'Show confirm password',
+                title: showConfirmPassword ? 'Hide password' : 'Show password',
                 style: {
                   position: 'absolute',
                   right: '8px',
@@ -301,7 +306,7 @@ const ForgotPasswordModal = ({ isOpen, onClose, onSuccess }) => {
                   justifyContent: 'center'
                 }
               },
-              showConfirmPassword ? '🙈' : '👁️'
+              React.createElement(PasswordVisibilityIcon, { visible: showConfirmPassword })
             )
           )
         ),

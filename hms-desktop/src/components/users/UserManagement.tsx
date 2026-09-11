@@ -5,6 +5,7 @@ import { canManageUsers, getRoleDisplayInfo, roleUsesConsultationFee } from '../
 import { UserRole } from '../../lib/api/types';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
+import PasswordVisibilityIcon from '../auth/PasswordVisibilityIcon';
 
 const getInitialUserFormData = () => ({
   username: '',
@@ -1139,7 +1140,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                   title: showResetNewPassword ? 'Hide password' : 'Show password',
                   className: 'absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600'
                 },
-                showResetNewPassword ? '🙈' : '👁️'
+                React.createElement(PasswordVisibilityIcon, { visible: showResetNewPassword })
               )
             )
           ),
@@ -1172,7 +1173,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                   title: showResetConfirmPassword ? 'Hide password' : 'Show password',
                   className: 'absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600'
                 },
-                showResetConfirmPassword ? '🙈' : '👁️'
+                React.createElement(PasswordVisibilityIcon, { visible: showResetConfirmPassword })
               )
             )
           ),

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import userService from '../../lib/api/services/userService';
+import PasswordVisibilityIcon from './PasswordVisibilityIcon';
 
 const ChangePasswordModal = ({ isOpen, onClose, onSuccess }: any) => {
   const [formData, setFormData] = useState({
@@ -161,9 +162,11 @@ const ChangePasswordModal = ({ isOpen, onClose, onSuccess }: any) => {
                   type: 'button',
                   onClick: () => setShowCurrentPassword(!showCurrentPassword),
                   disabled: loading,
+                  'aria-label': showCurrentPassword ? 'Hide current password' : 'Show current password',
+                  title: showCurrentPassword ? 'Hide password' : 'Show password',
                   className: 'absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 disabled:opacity-50'
                 },
-                showCurrentPassword ? '🙈' : '👁️'
+                React.createElement(PasswordVisibilityIcon, { visible: showCurrentPassword })
               )
             )
           ),
@@ -199,9 +202,11 @@ const ChangePasswordModal = ({ isOpen, onClose, onSuccess }: any) => {
                   type: 'button',
                   onClick: () => setShowNewPassword(!showNewPassword),
                   disabled: loading,
+                  'aria-label': showNewPassword ? 'Hide new password' : 'Show new password',
+                  title: showNewPassword ? 'Hide password' : 'Show password',
                   className: 'absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 disabled:opacity-50'
                 },
-                showNewPassword ? '🙈' : '👁️'
+                React.createElement(PasswordVisibilityIcon, { visible: showNewPassword })
               )
             )
           ),
@@ -237,9 +242,11 @@ const ChangePasswordModal = ({ isOpen, onClose, onSuccess }: any) => {
                   type: 'button',
                   onClick: () => setShowConfirmPassword(!showConfirmPassword),
                   disabled: loading,
+                  'aria-label': showConfirmPassword ? 'Hide confirm password' : 'Show confirm password',
+                  title: showConfirmPassword ? 'Hide password' : 'Show password',
                   className: 'absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 disabled:opacity-50'
                 },
-                showConfirmPassword ? '🙈' : '👁️'
+                React.createElement(PasswordVisibilityIcon, { visible: showConfirmPassword })
               )
             )
           )
