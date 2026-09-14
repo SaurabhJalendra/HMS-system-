@@ -309,6 +309,12 @@ const App: React.FC = () => {
   const handleNavigation = (module: ModuleName, action: any = null): void => {
     // Check if user has access to the module
     if (user && hasModuleAccess(user.role, module)) {
+      const receptionistLike = user.role === 'RECEPTIONIST' || user.role === 'ADMIN';
+      if (module === 'appointments' && receptionistLike) {
+        setCurrentModule('opdFlow');
+        setCurrentAction(action || 'bookAppointment');
+        return;
+      }
       setCurrentModule(module);
       setCurrentAction(action);
     } else {
@@ -358,13 +364,20 @@ const App: React.FC = () => {
           user,
           isAuthenticated,
           onBack: () => handleNavigation('dashboard'),
+          initialAction: currentAction,
         });
       case 'patients':
         return React.createElement(PatientManagement, { user, isAuthenticated });
       case 'appointments':
         return React.createElement(AppointmentManagement, { user, isAuthenticated, onNavigate: handleNavigation });
       case 'consultations':
-        return React.createElement(ConsultationManagement, { user, isAuthenticated, onBack: () => handleNavigation('dashboard'), appointmentData: currentAction });
+        return React.createElement(ConsultationManagement, {
+          user,
+          isAuthenticated,
+          onBack: () => handleNavigation('dashboard'),
+          onNavigate: handleNavigation,
+          appointmentData: currentAction,
+        });
       case 'users':
         return React.createElement(UserManagement, { user, isAuthenticated });
       case 'prescriptions':

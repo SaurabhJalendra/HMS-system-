@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Patient } from '../../../lib/api/types';
 import PatientSearch from '../shared/PatientSearch';
 import PatientCard from '../shared/PatientCard';
@@ -6,11 +6,20 @@ import PatientRegistrationForm from '../../patients/PatientRegistrationForm';
 
 interface PatientRegistrationStepProps {
   onPatientReady: (patient: Patient) => void;
+  initialMode?: 'search' | 'new';
 }
 
-const PatientRegistrationStep: React.FC<PatientRegistrationStepProps> = ({ onPatientReady }) => {
-  const [mode, setMode] = useState<'search' | 'new'>('search');
+const PatientRegistrationStep: React.FC<PatientRegistrationStepProps> = ({
+  onPatientReady,
+  initialMode = 'search',
+}) => {
+  const [mode, setMode] = useState<'search' | 'new'>(initialMode);
   const [selected, setSelected] = useState<Patient | null>(null);
+
+  useEffect(() => {
+    setMode(initialMode);
+    setSelected(null);
+  }, [initialMode]);
 
   const handleSelect = (patient: Patient) => {
     setSelected(patient);

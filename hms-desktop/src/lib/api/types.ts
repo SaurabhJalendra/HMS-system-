@@ -373,6 +373,7 @@ export interface CreateAppointmentRequest {
 }
 
 export interface UpdateAppointmentRequest {
+  doctorId?: string;
   date?: string;
   time?: string;
   status?: AppointmentStatus;

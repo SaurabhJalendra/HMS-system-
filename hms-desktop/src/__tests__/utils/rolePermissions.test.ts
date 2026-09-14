@@ -160,6 +160,12 @@ describe('Role Permissions', () => {
       expect(actions.some((action) => action.name === 'Patients')).toBe(true);
     });
 
+    it('should send receptionist register and book actions to OPD Flow', () => {
+      const actions = getRoleQuickActions(UserRole.RECEPTIONIST);
+      expect(actions.find((action) => action.name === 'Register Patient')?.module).toBe('opdFlow');
+      expect(actions.find((action) => action.name === 'Book Appointment')?.module).toBe('opdFlow');
+    });
+
     it('should hide available modules for lab technicians', () => {
       expect(shouldShowAvailableModules(UserRole.LAB_TECH)).toBe(false);
       expect(shouldShowAvailableModules(UserRole.ADMIN)).toBe(true);

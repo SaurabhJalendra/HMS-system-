@@ -133,6 +133,8 @@ const PatientManagement = ({ user }: any = {}) => {
       next = digitsOnly(value, 10);
     } else if (name === 'age') {
       next = digitsOnly(value, 3);
+    } else if (name === 'aadharCardNumber') {
+      next = digitsOnly(value, 12);
     }
     setFormData(prev => ({
       ...prev,
@@ -158,6 +160,11 @@ const PatientManagement = ({ user }: any = {}) => {
       }
       if (!/^[0-9]{10}$/.test(formData.phone)) {
         setError('Phone number must be exactly 10 digits');
+        setIsSubmitting(false);
+        return;
+      }
+      if (formData.nationality === 'IN' && formData.aadharCardNumber && !/^[0-9]{12}$/.test(formData.aadharCardNumber)) {
+        setError('Aadhar card number must be exactly 12 digits');
         setIsSubmitting(false);
         return;
       }
@@ -995,10 +1002,12 @@ const PatientManagement = ({ user }: any = {}) => {
             ),
             formData.nationality === 'IN' ? React.createElement('input', {
               type: 'text',
+              inputMode: 'numeric',
+              autoComplete: 'off',
               name: 'aadharCardNumber',
               value: formData.aadharCardNumber,
               onChange: handleInputChange,
-              placeholder: 'Aadhar Card Number (12 digits)',
+              placeholder: 'Aadhar Card Number (12 digits only)',
               maxLength: 12,
               pattern: '[0-9]{12}',
               title: 'Aadhar card number must be exactly 12 digits',

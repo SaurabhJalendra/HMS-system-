@@ -4,6 +4,7 @@ import {
   bloodGroupSelectValue,
   digitsOnly,
   isTenDigitPhone,
+  isTwelveDigitAadhar,
 } from '../../lib/constants/patientFields';
 
 describe('patientFields', () => {
@@ -25,6 +26,14 @@ describe('patientFields', () => {
   it('keeps only digits up to the max length', () => {
     expect(digitsOnly('98ab76-543210 extra', 10)).toBe('9876543210');
     expect(digitsOnly('12', 3)).toBe('12');
+    expect(digitsOnly('kifndefnskjv123', 12)).toBe('123');
+    expect(digitsOnly('1234abcd56789012', 12)).toBe('123456789012');
+  });
+
+  it('accepts only an exact 12-digit Aadhar', () => {
+    expect(isTwelveDigitAadhar('123456789012')).toBe(true);
+    expect(isTwelveDigitAadhar('12345678901')).toBe(false);
+    expect(isTwelveDigitAadhar('12345678901a')).toBe(false);
   });
 
   it('accepts only an exact 10-digit phone', () => {

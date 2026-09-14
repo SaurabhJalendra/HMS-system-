@@ -16,6 +16,7 @@ const appointmentCreateSchema = z.object({
 });
 
 const appointmentUpdateSchema = z.object({
+  doctorId: z.string().optional(),
   date: z.string().optional(),
   time: z.string().optional(),
   status: z.nativeEnum(AppointmentStatus).optional(),
@@ -362,9 +363,10 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
     }
 
     // If updating date/time, check for conflicts
-    if (validatedData.date || validatedData.time) {
+    if (validatedData.date || validatedData.time || validatedData.doctorId) {
       const newDate = validatedData.date ? new Date(validatedData.date) : existingAppointment.date;
       const newTime = validatedData.time || existingAppointment.time;
+      const newDoctorId = validatedData.doctorId || existingAppointment.doctorId;
 
       // Normalize date to start of day for accurate comparison
       const appointmentDate = new Date(newDate);
@@ -375,7 +377,7 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
       const conflictingAppointment = await prisma.appointment.findFirst({
         where: {
           id: { not: id },
-          doctorId: existingAppointment.doctorId,
+          doctorId: newDoctorId,
           date: {
             gte: appointmentDate,
             lt: nextDay,
@@ -401,6 +403,7 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
     if (validatedData.date) updateData.date = new Date(validatedData.date);
     if (validatedData.time) updateData.time = validatedData.time;
     if (validatedData.status) updateData.status = validatedData.status;
+    if (validatedData.doctorId) updateData.doctorId = validatedData.doctorId;
 
     // Update appointment
     const updatedAppointment = await prisma.appointment.update({

@@ -26,6 +26,7 @@ class PatientService {
     search?: string;
     gender?: string;
     bloodGroup?: string;
+    createdFrom?: string;
     page?: number;
     limit?: number;
   }): Promise<{ patients: Patient[]; pagination: any }> {

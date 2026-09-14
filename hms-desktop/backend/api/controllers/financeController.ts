@@ -10,14 +10,23 @@ const plQuerySchema = z.object({
   to: z.string().optional(),
 });
 
+function parseLocalDayStart(isoDate: string) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+function parseLocalDayEnd(isoDate: string) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59, 999);
+}
+
 function toDateRange(from?: string, to?: string) {
   const now = new Date();
-  const defaultFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-  const defaultTo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+  const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const defaultTo = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-  const start = from ? new Date(from) : defaultFrom;
-  const end = to ? new Date(to) : defaultTo;
-  end.setHours(23, 59, 59, 999);
+  const start = from ? parseLocalDayStart(from) : defaultFrom;
+  const end = to ? parseLocalDayEnd(to) : defaultTo;
   return { start, end };
 }
 
@@ -28,7 +37,7 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
 
     const [opdRevenueAgg, ipdRevenueAgg, expensesAgg] = await Promise.all([
       prisma.bill.aggregate({
-        where: { paymentStatus: 'PAID', createdAt: { gte: start, lte: end } },
+        where: { paymentStatus: { in: ['PAID', 'PARTIAL'] }, createdAt: { gte: start, lte: end } },
         _sum: { totalAmount: true },
       }),
       prisma.inpatientBill.aggregate({

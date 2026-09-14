@@ -9,16 +9,16 @@ const prisma = new PrismaClient();
 // Item schema for section-wise billing
 const billItemSchema = z.object({
   description: z.string().min(1),
-  quantity: z.number().positive(),
-  unitPrice: z.number().positive(),
-  amount: z.number().positive(),
+  quantity: z.number().min(0),
+  unitPrice: z.number().min(0),
+  amount: z.number().min(0),
   medicineId: z.string().optional(),
   testId: z.string().optional(),
 });
 
 // Validation schemas
 const createBillSchema = z.object({
-  patientId: z.string().uuid(),
+  patientId: z.string().min(1, 'Patient ID is required'),
   items: z.object({
     consultation: z.object({
       items: z.array(billItemSchema).optional().default([]),
@@ -38,6 +38,9 @@ const createBillSchema = z.object({
     }).optional().default({ items: [], subtotal: 0 }),
   }),
   paymentMode: z.enum(['CASH', 'CARD', 'UPI', 'NET_BANKING', 'INSURANCE']).optional().default('CASH'),
+  paymentStatus: z.enum(['PENDING', 'PAID', 'PARTIAL', 'CANCELLED']).optional().default('PAID'),
+  discountPct: z.number().min(0).max(100).optional().default(0),
+  taxPct: z.number().min(0).optional().default(0),
 });
 
 const updateBillSchema = z.object({
@@ -48,7 +51,7 @@ const updateBillSchema = z.object({
 const billSearchSchema = z.object({
   search: z.string().optional(),
   status: z.enum(['PENDING', 'PAID', 'PARTIAL', 'CANCELLED']).optional(),
-  patientId: z.string().uuid().optional(),
+  patientId: z.string().min(1).optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
   page: z.coerce.number().min(1).optional().default(1),
@@ -133,8 +136,12 @@ export const createBill = async (req: AuthRequest, res: Response) => {
       sections.labTests.subtotal +
       sections.other.subtotal;
 
-    const tax = 0; // Simple implementation - no tax for now
-    const totalAmount = subtotal + tax;
+    const discountPct = validatedData.discountPct || 0;
+    const taxPct = validatedData.taxPct || 0;
+    const discountAmount = subtotal * (discountPct / 100);
+    const afterDiscount = subtotal - discountAmount;
+    const tax = afterDiscount * (taxPct / 100);
+    const totalAmount = afterDiscount + tax;
 
     // Generate invoice number using prefix and next invoice number
     const invoiceNumber = await generateInvoiceNumber();
@@ -145,12 +152,17 @@ export const createBill = async (req: AuthRequest, res: Response) => {
         patientId: validatedData.patientId,
         receptionistId: userId,
         invoiceNumber,
-        items: sections as any, // Store section-wise items
+        items: {
+          ...sections,
+          discountPct,
+          taxPct,
+          discountAmount,
+        } as any,
         subtotal,
         tax,
         totalAmount,
         paymentMode: validatedData.paymentMode,
-        paymentStatus: 'PENDING',
+        paymentStatus: validatedData.paymentStatus || 'PAID',
       },
       include: {
         patient: {
