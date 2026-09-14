@@ -157,8 +157,8 @@ export const getRoleQuickActions = (userRole) => {
       { name: 'Write Prescription', icon: '💊', action: 'newPrescription', module: 'prescriptions' },
     ],
     [UserRole.RECEPTIONIST]: [
-      { name: 'Register Patient', icon: '👥', action: 'addPatient', module: 'patients' },
-      { name: 'Book Appointment', icon: '📅', action: 'bookAppointment', module: 'appointments' },
+      { name: 'Register Patient', icon: '👥', action: 'addPatient', module: 'opdFlow' },
+      { name: 'Book Appointment', icon: '📅', action: 'bookAppointment', module: 'opdFlow' },
       { name: 'Generate Bill', icon: '💰', action: 'generateBill', module: 'billing' },
     ],
     [UserRole.LAB_TECH]: [

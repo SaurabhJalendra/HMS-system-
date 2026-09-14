@@ -6,8 +6,21 @@ import patientService from '../../lib/api/services/patientService';
 import userService from '../../lib/api/services/userService';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
+import AppointmentSlotPicker from '../patientJourney/shared/AppointmentSlotPicker';
+import { toLocalYmd } from '../../lib/utils/localDate';
 
-const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { onBack?: any; user?: any; appointmentData?: any; isAuthenticated?: boolean }) => {
+const ConsultationManagement = ({
+  onBack: _onBack,
+  user,
+  appointmentData,
+  onNavigate,
+}: {
+  onBack?: any;
+  user?: any;
+  appointmentData?: any;
+  isAuthenticated?: boolean;
+  onNavigate?: (module: string, action?: any) => void;
+}) => {
   const [consultations, setConsultations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -15,11 +28,6 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
   const [showAddForm, setShowAddForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingConsultation, setEditingConsultation] = useState(null);
-
-  useCriticalUpdateLock(
-    Boolean(showAddForm || showEditForm),
-    'consultation-management'
-  );
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDoctor, setFilterDoctor] = useState('');
   const [filterPatient, setFilterPatient] = useState('');
@@ -41,6 +49,13 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
   const [doctors, setDoctors] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [appointmentsWithConsultations, setAppointmentsWithConsultations] = useState(new Set()); // Track which appointments have consultations
+  const [rescheduleAppointment, setRescheduleAppointment] = useState(null);
+  const [rescheduleSaving, setRescheduleSaving] = useState(false);
+
+  useCriticalUpdateLock(
+    Boolean(showAddForm || showEditForm || rescheduleAppointment),
+    'consultation-management'
+  );
 
   // Load data on component mount
   useEffect(() => {
@@ -57,7 +72,12 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
 
   // Handle appointment data passed from appointment management
   useEffect(() => {
-    if (appointmentData) {
+    if (
+      appointmentData &&
+      typeof appointmentData === 'object' &&
+      appointmentData.appointmentId &&
+      appointmentData.openConsultForm
+    ) {
       setFormData({
         appointmentId: appointmentData.appointmentId || '',
         patientId: appointmentData.patientId || '',
@@ -65,7 +85,7 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
         diagnosis: '',
         notes: ''
       });
-      setShowAddForm(true); // Automatically open the consultation form
+      setShowAddForm(true);
     }
   }, [appointmentData]);
 
@@ -180,10 +200,16 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
   };
 
   const handleConsult = (appointment) => {
-    // Pre-fill form with appointment data and open consultation form
-    const _patient = appointment.patient || patients.find(p => p.id === appointment.patientId);
-    const _doctor = appointment.doctor || doctors.find(d => d.id === appointment.doctorId);
-    
+    if (onNavigate) {
+      onNavigate('opdFlow', {
+        action: 'consultQueue',
+        appointmentId: appointment.id,
+        appointmentDate: toLocalYmd(appointment.date),
+        doctorId: appointment.doctorId,
+      });
+      return;
+    }
+
     setFormData({
       appointmentId: appointment.id,
       patientId: appointment.patientId,
@@ -196,25 +222,26 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
     setSuccess('');
   };
 
-  const handleDeleteAppointment = async (appointmentId) => {
-    if (!window.confirm('Are you sure you want to cancel/delete this appointment? This action cannot be undone.')) {
-      return;
-    }
-
-    setLoading(true);
+  const handleReschedule = async (payload) => {
+    if (!rescheduleAppointment) return;
+    setRescheduleSaving(true);
+    setError('');
     try {
-      await appointmentService.updateAppointment(appointmentId, {
-        status: 'CANCELLED'
+      await appointmentService.updateAppointment(rescheduleAppointment.id, {
+        doctorId: payload.doctorId,
+        date: payload.date,
+        time: payload.time,
+        status: 'SCHEDULED',
       });
-      setSuccess('✅ Appointment cancelled successfully!');
+      setSuccess('Appointment rescheduled successfully.');
+      setRescheduleAppointment(null);
       await loadAppointments();
-      await loadConsultations(); // Reload to update tracking
+      await loadConsultations();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError('❌ Failed to cancel appointment: ' + (err.response?.data?.message || err.message));
-      console.error('Error cancelling appointment:', err);
+      setError(err?.response?.data?.message || err?.message || 'Failed to reschedule appointment');
     } finally {
-      setLoading(false);
+      setRescheduleSaving(false);
     }
   };
 
@@ -1054,9 +1081,9 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
                       React.createElement(
                         'button',
                         {
-                          onClick: () => handleDeleteAppointment(appointment.id),
+                          onClick: () => setRescheduleAppointment(appointment),
                           style: {
-                            backgroundColor: '#EF4444',
+                            backgroundColor: '#2563EB',
                             color: '#FFFFFF',
                             border: 'none',
                             padding: '6px 12px',
@@ -1066,7 +1093,7 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
                             fontWeight: '500'
                           }
                         },
-                        'Delete'
+                        'Re-Schedule'
                       )
                     )
                   )
@@ -1285,7 +1312,68 @@ const ConsultationManagement = ({ onBack: _onBack, user, appointmentData }: { on
     ),
 
     // Consultation form modal
-    (showAddForm || showEditForm) && renderConsultationForm()
+    (showAddForm || showEditForm) && renderConsultationForm(),
+    rescheduleAppointment && React.createElement(
+      'div',
+      {
+        style: {
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 50,
+          padding: 16,
+        },
+      },
+      React.createElement(
+        'div',
+        {
+          style: {
+            backgroundColor: '#FFF',
+            borderRadius: 8,
+            padding: 20,
+            width: '100%',
+            maxWidth: 480,
+            boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+          },
+        },
+        React.createElement(
+          'div',
+          { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
+          React.createElement('h3', { style: { margin: 0, fontSize: 16, fontWeight: 600 } }, 'Re-Schedule appointment'),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              onClick: () => setRescheduleAppointment(null),
+              style: { border: 'none', background: 'none', cursor: 'pointer', fontSize: 18 },
+            },
+            '×'
+          )
+        ),
+        React.createElement(
+          'p',
+          { style: { margin: '0 0 12px', fontSize: 14, color: '#374151' } },
+          `${rescheduleAppointment.patient?.name || 'Patient'} · current ${toLocalYmd(rescheduleAppointment.date)} ${rescheduleAppointment.time || ''}`
+        ),
+        rescheduleSaving
+          ? React.createElement('p', { style: { fontSize: 14, color: '#6B7280' } }, 'Saving…')
+          : React.createElement(AppointmentSlotPicker, {
+              patientId: rescheduleAppointment.patientId,
+              initialDoctorId: rescheduleAppointment.doctorId,
+              initialDate: (() => {
+                const today = toLocalYmd();
+                const aptDate = toLocalYmd(rescheduleAppointment.date);
+                return aptDate >= today ? aptDate : today;
+              })(),
+              initialTime: rescheduleAppointment.time || '',
+              submitLabel: 'Save new schedule',
+              onSelect: handleReschedule,
+            })
+      )
+    )
   );
 };
 

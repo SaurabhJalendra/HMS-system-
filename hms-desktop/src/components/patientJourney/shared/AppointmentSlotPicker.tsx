@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import appointmentService from '../../../lib/api/services/appointmentService';
 import type { User } from '../../../types';
+import { toLocalYmd } from '../../../lib/utils/localDate';
 
 interface AppointmentSlotPickerProps {
   patientId: string | null;
   onSelect: (payload: { doctorId: string; date: string; time: string }) => void;
   doctors?: User[];
+  initialDoctorId?: string;
+  initialDate?: string;
+  initialTime?: string;
+  submitLabel?: string;
+  requirePatient?: boolean;
 }
 
 const TIME_SLOTS = [
@@ -17,11 +23,16 @@ const AppointmentSlotPicker: React.FC<AppointmentSlotPickerProps> = ({
   patientId,
   onSelect,
   doctors: doctorsProp,
+  initialDoctorId = '',
+  initialDate = '',
+  initialTime = '',
+  submitLabel = 'Schedule appointment',
+  requirePatient = true,
 }) => {
   const [doctors, setDoctors] = useState<User[]>(doctorsProp || []);
-  const [selectedDoctorId, setSelectedDoctorId] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
+  const [selectedDoctorId, setSelectedDoctorId] = useState(initialDoctorId);
+  const [date, setDate] = useState(initialDate);
+  const [time, setTime] = useState(initialTime);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -34,18 +45,26 @@ const AppointmentSlotPicker: React.FC<AppointmentSlotPickerProps> = ({
     return () => { cancelled = true; };
   }, [doctorsProp]);
 
-  const today = new Date().toISOString().split('T')[0];
+  useEffect(() => {
+    if (initialDoctorId) setSelectedDoctorId(initialDoctorId);
+    if (initialDate) setDate(initialDate);
+    if (initialTime) setTime(initialTime);
+  }, [initialDoctorId, initialDate, initialTime]);
+
+  const today = toLocalYmd();
+  const patientMissing = requirePatient && !patientId;
+  const canSubmit = !patientMissing && !!selectedDoctorId && !!date && !!time;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedDoctorId && date && time) {
+    if (canSubmit) {
       onSelect({ doctorId: selectedDoctorId, date, time });
     }
   };
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {!patientId && (
+      {patientMissing && (
         <p style={{ color: '#B45309', fontSize: 14 }}>Complete Step 1 (select or register patient) first.</p>
       )}
       <div>
@@ -108,18 +127,18 @@ const AppointmentSlotPicker: React.FC<AppointmentSlotPickerProps> = ({
       </div>
       <button
         type="submit"
-        disabled={!patientId || !selectedDoctorId || !date || !time}
+        disabled={!canSubmit}
         style={{
           padding: '10px 16px',
-          backgroundColor: (!patientId || !selectedDoctorId || !date || !time) ? '#9CA3AF' : '#2563EB',
+          backgroundColor: canSubmit ? '#2563EB' : '#9CA3AF',
           color: '#FFF',
           border: 'none',
           borderRadius: '6px',
-          cursor: (!patientId || !selectedDoctorId || !date || !time) ? 'not-allowed' : 'pointer',
+          cursor: canSubmit ? 'pointer' : 'not-allowed',
           fontWeight: 500,
         }}
       >
-        Schedule appointment
+        {submitLabel}
       </button>
     </form>
   );

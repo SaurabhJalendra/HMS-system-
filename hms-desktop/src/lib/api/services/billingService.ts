@@ -14,6 +14,9 @@ const billingService = {
   // Create a new bill
   async createBill(billData: CreateBillRequest): Promise<Bill> {
     const response = await apiClient.post<ApiResponse<Bill>>('/billing', billData);
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Failed to save bill');
+    }
     return response.data.data;
   },
 

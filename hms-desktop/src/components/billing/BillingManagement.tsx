@@ -10,6 +10,7 @@ import InvoicePDFGenerator from '../../lib/utils/invoicePDFGenerator';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
 import ProfitLossPanel from './ProfitLossPanel';
+import billingService from '../../lib/api/services/billingService';
 
 const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; onBack?: () => void }) => {
   const { formatCurrency, config } = useHospitalConfig();
@@ -19,6 +20,7 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   /** Non-blocking note after Load Items (e.g. one API failed but others succeeded) */
   const [loadNote, setLoadNote] = useState('');
   const [activePage, setActivePage] = useState('billing'); // 'billing' | 'pl'
@@ -90,7 +92,16 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
       setError('Please select a patient');
       return;
     }
+    if (!dateFrom) {
+      setError('Start date is required to load a patient\'s bills');
+      return;
+    }
+    if (dateTo && dateTo < dateFrom) {
+      setError('End date cannot be before the start date');
+      return;
+    }
     setError('');
+    setSuccess('');
     setLoadNote('');
     setLoading(true);
     // Use latest saved hospital fee (context may be stale right after Configuration save)
@@ -344,6 +355,66 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
     });
   };
 
+  const mapSectionItems = (sectionKey) => ({
+    items: sections[sectionKey].items
+      .filter((item) => selectedIds.has(item.id) && item.description)
+      .map((item) => ({
+        description: item.description,
+        quantity: Number(item.quantity) || 0,
+        unitPrice: Number(item.unitPrice) || 0,
+        amount: Number(item.amount) || 0,
+      })),
+    subtotal: 0,
+  });
+
+  const saveBill = async () => {
+    try {
+      if (!selectedPatientId) {
+        setError('Please select a patient');
+        return;
+      }
+      if (!dateFrom) {
+        setError('Start date is required to save a patient\'s bill');
+        return;
+      }
+
+      const payloadItems = {
+        consultation: mapSectionItems('consultation'),
+        pharmacy: mapSectionItems('pharmacy'),
+        labTests: mapSectionItems('labTests'),
+        other: mapSectionItems('other'),
+      };
+      const hasItems = Object.values(payloadItems).some((section) => section.items.length > 0);
+      if (!hasItems) {
+        setError('Select at least one billable item before saving the bill.');
+        return;
+      }
+
+      setLoading(true);
+      setError('');
+      setSuccess('');
+      const bill = await billingService.createBill({
+        patientId: selectedPatientId,
+        items: payloadItems,
+        paymentMode: 'CASH',
+        paymentStatus: 'PAID',
+        discountPct: Number(globalDiscountPct || 0),
+        taxPct: Number(taxPct || 0),
+      } as any);
+
+      setSuccess(
+        `Bill saved${bill?.invoiceNumber ? ` (${bill.invoiceNumber})` : ''}. Total ${
+          typeof bill?.totalAmount === 'number' ? bill.totalAmount : totals.grand
+        }.`
+      );
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || 'Failed to save bill');
+      console.error('Error saving bill:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const printInvoice = async (printType = 'all') => {
     try {
       setLoading(true);
@@ -591,32 +662,40 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
         {/* Active Section Content */}
         <div style={{ padding: '8px' }}>
           {/* Filters - Shown in every section */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '8px', backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: '6px 8px' }}>
-            {/* Patient */}
-            <select
-              value={selectedPatientId}
-              onChange={(e) => setSelectedPatientId(e.target.value)}
-              style={{ padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}
-            >
-              <option value="">Select Patient</option>
-              {patients.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            {/* Date from */}
-            <input 
-              type="date" 
-              value={dateFrom} 
-              onChange={(e) => setDateFrom(e.target.value)} 
-              style={{ padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}
-            />
-            {/* Date to */}
-            <input 
-              type="date" 
-              value={dateTo} 
-              onChange={(e) => setDateTo(e.target.value)} 
-              style={{ padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '8px', backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: '6px 8px', alignItems: 'end' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Patient name</label>
+              <select
+                value={selectedPatientId}
+                onChange={(e) => setSelectedPatientId(e.target.value)}
+                style={{ padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}
+              >
+                <option value="">Select patient</option>
+                {patients.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Start date *</label>
+              <input 
+                type="date" 
+                value={dateFrom} 
+                required
+                onChange={(e) => setDateFrom(e.target.value)} 
+                style={{ padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>End date</label>
+              <input 
+                type="date" 
+                value={dateTo} 
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)} 
+                style={{ padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}
+              />
+            </div>
             {/* Load button */}
             <button 
               onClick={loadItems} 
@@ -666,6 +745,7 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
             </button>
           </div>
           {error && <div style={{ marginTop: '8px', padding: '6px 8px', backgroundColor: '#FEE2E2', border: '1px solid #FECACA', borderRadius: '2px', color: '#991B1B', fontSize: '13px' }}>{error}</div>}
+          {success && <div style={{ marginTop: '8px', padding: '6px 8px', backgroundColor: '#D1FAE5', border: '1px solid #6EE7B7', borderRadius: '2px', color: '#065F46', fontSize: '13px' }}>{success}</div>}
           {loadNote && !error && (
             <div style={{ marginTop: '8px', padding: '6px 8px', backgroundColor: '#FEF9C3', border: '1px solid #FDE047', borderRadius: '2px', color: '#854D0E', fontSize: '13px' }}>
               Some sources could not be loaded: {loadNote}
@@ -733,10 +813,11 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
                 🖨️ Print All Sections
               </button>
               <button 
-                onClick={() => printInvoice('current')} 
+                onClick={saveBill}
+                disabled={loading}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2"
               >
-                📄 Print {getSectionTitle(activeSection)}
+                Save Bill
               </button>
               <button 
                 onClick={() => printInvoice('selected')} 

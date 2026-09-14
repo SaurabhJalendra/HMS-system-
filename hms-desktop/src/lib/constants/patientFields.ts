@@ -21,6 +21,10 @@ export function isTenDigitPhone(value: string): boolean {
   return /^[0-9]{10}$/.test(value);
 }
 
+export function isTwelveDigitAadhar(value: string): boolean {
+  return /^[0-9]{12}$/.test(value);
+}
+
 export function bloodGroupSelectValue(stored?: string | null): BloodGroupOption | '' {
   if (!stored) return '';
   if ((BLOOD_GROUP_OPTIONS as readonly string[]).includes(stored)) {

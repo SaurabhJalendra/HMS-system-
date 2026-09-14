@@ -126,12 +126,9 @@ const patientSearchSchema = z.object({
   search: z.string().optional(),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
   bloodGroup: z.string().optional(),
-  page: z.string().transform((val) => parseInt(val, 10) || 1).optional(),
-  limit: z.string().transform((val) => {
-    const n = parseInt(val, 10);
-    if (!Number.isFinite(n) || n < 1) return 20;
-    return Math.min(n, 100);
-  }).optional(),
+  createdFrom: z.string().optional(),
+  page: z.coerce.number().min(1).optional().default(1),
+  limit: z.coerce.number().min(1).max(100).optional().default(20),
 });
 
 // Create new patient
@@ -278,7 +275,7 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
 // Get all patients with search and pagination
 export const getPatients = async (req: AuthRequest, res: Response) => {
   try {
-    const { search, gender, bloodGroup, page = 1, limit = 20 } = patientSearchSchema.parse(req.query);
+    const { search, gender, bloodGroup, createdFrom, page = 1, limit = 20 } = patientSearchSchema.parse(req.query);
 
     const skip = (page - 1) * limit;
 
@@ -311,6 +308,13 @@ export const getPatients = async (req: AuthRequest, res: Response) => {
 
     if (bloodGroup) {
       where.bloodGroup = bloodGroup;
+    }
+
+    if (createdFrom) {
+      const [y, m, d] = createdFrom.split('-').map(Number);
+      if (y && m && d) {
+        where.createdAt = { gte: new Date(y, m - 1, d, 0, 0, 0, 0) };
+      }
     }
 
     // Get patients with pagination

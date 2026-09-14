@@ -10,6 +10,7 @@ import TodaysQueue from './doctor/TodaysQueue';
 import ConsultationForm from './doctor/ConsultationForm';
 import PrescriptionWriter from './doctor/PrescriptionWriter';
 import type { OpdQueueRowKind } from './doctor/opdQueueHelpers';
+import { toLocalYmd } from '../../lib/utils/localDate';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
 
@@ -17,13 +18,21 @@ interface PatientJourneyModuleProps {
   user: User;
   isAuthenticated: boolean;
   onBack: () => void;
+  initialAction?: any;
 }
 
 type ReceptionistStep = 'registration' | 'scheduling' | 'confirmation';
 type DoctorStep = 'queue' | 'consultation' | 'prescription' | 'visitComplete';
 
-const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAuthenticated, onBack }) => {
+const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAuthenticated: _isAuthenticated, onBack, initialAction }) => {
   const role = user?.role as UserRole;
+
+  const actionName =
+    typeof initialAction === 'string' ? initialAction : initialAction?.action || initialAction?.type;
+  const isAddPatient = actionName === 'addPatient' || actionName === 'newPatient';
+  const isBookAppointment =
+    actionName === 'bookAppointment' || actionName === 'searchPatients' || actionName === 'viewPatients';
+  const isConsultQueue = actionName === 'consultQueue';
 
   // Receptionist state
   const [receptionistStep, setReceptionistStep] = useState<ReceptionistStep>('registration');
@@ -40,6 +49,15 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
 
   const isReceptionist = role === UserRole.RECEPTIONIST || role === UserRole.ADMIN;
   const isDoctor = role === UserRole.DOCTOR || role === UserRole.ADMIN;
+  const receptionistMode: 'search' | 'new' = isAddPatient ? 'new' : 'search';
+  const queueDate = isConsultQueue
+    ? toLocalYmd(initialAction?.appointmentDate || initialAction?.date)
+    : undefined;
+  const focusAppointmentId = isConsultQueue ? initialAction?.appointmentId : undefined;
+  const queueDoctorId = isConsultQueue ? initialAction?.doctorId : undefined;
+
+  const showReceptionistSection = isReceptionist && !isConsultQueue && (role !== UserRole.DOCTOR || role === UserRole.ADMIN);
+  const showDoctorSection = isDoctor && !isAddPatient && !isBookAppointment && (role !== UserRole.RECEPTIONIST || role === UserRole.ADMIN);
 
   const handleReceptionistPatientReady = (patient: Patient) => {
     setReceptionistPatient(patient);
@@ -163,11 +181,15 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
           </div>
         )}
 
-        {isReceptionist && (role !== UserRole.DOCTOR || role === UserRole.ADMIN) && (
+        {showReceptionistSection && (
           <section style={{ marginBottom: 32 }}>
             <h2 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>Receptionist: Register & schedule</h2>
             {receptionistStep === 'registration' && (
-              <PatientRegistrationStep onPatientReady={handleReceptionistPatientReady} />
+              <PatientRegistrationStep
+                key={receptionistMode}
+                initialMode={receptionistMode}
+                onPatientReady={handleReceptionistPatientReady}
+              />
             )}
             {receptionistStep === 'scheduling' && (
               <AppointmentSchedulingStep
@@ -185,12 +207,15 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
           </section>
         )}
 
-        {isDoctor && (role !== UserRole.RECEPTIONIST || role === UserRole.ADMIN) && (
+        {showDoctorSection && (
           <section>
             <h2 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>Doctor: Queue → Consult → Prescribe</h2>
             {doctorStep === 'queue' && (
               <TodaysQueue
                 currentUserId={user.id}
+                doctorId={queueDoctorId}
+                queueDate={queueDate}
+                focusAppointmentId={focusAppointmentId}
                 onSelectAppointment={handleDoctorSelectAppointment}
                 refreshKey={queueRefreshKey}
               />
@@ -253,7 +278,7 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
           </section>
         )}
 
-        {!isReceptionist && !isDoctor && (
+        {!showReceptionistSection && !showDoctorSection && (
           <p style={{ color: '#6B7280' }}>OPD Flow is available to Receptionist and Doctor roles.</p>
         )}
       </div>

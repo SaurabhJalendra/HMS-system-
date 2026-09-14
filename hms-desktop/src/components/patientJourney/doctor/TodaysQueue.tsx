@@ -3,9 +3,15 @@ import appointmentService from '../../../lib/api/services/appointmentService';
 import type { Appointment } from '../../../lib/api/types';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { getOpdQueueRowKind, getOpdQueueRowLabel, type OpdQueueRowKind } from './opdQueueHelpers';
+import { toLocalYmd } from '../../../lib/utils/localDate';
 
 interface TodaysQueueProps {
   currentUserId: string;
+  /** Override doctor filter (e.g. admin opening another doctor's visit). */
+  doctorId?: string;
+  /** YYYY-MM-DD; defaults to today. */
+  queueDate?: string;
+  focusAppointmentId?: string;
   /** Called with how this row should open in OPD (consultation vs prescription vs summary). */
   onSelectAppointment: (appointment: Appointment, kind: OpdQueueRowKind) => void;
   /** Increment to refetch after completing a prescription, etc. */
@@ -14,18 +20,22 @@ interface TodaysQueueProps {
 
 const TodaysQueue: React.FC<TodaysQueueProps> = ({
   currentUserId,
+  doctorId,
+  queueDate,
+  focusAppointmentId,
   onSelectAppointment,
   refreshKey = 0,
 }) => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
+  const resolvedDate = queueDate || toLocalYmd();
+  const resolvedDoctorId = doctorId || currentUserId;
 
   useEffect(() => {
     let cancelled = false;
-    const today = new Date().toISOString().split('T')[0];
     setLoading(true);
     appointmentService
-      .getAppointments({ doctorId: currentUserId, date: today, limit: 100 })
+      .getAppointments({ doctorId: resolvedDoctorId, date: resolvedDate, limit: 100 })
       .then((data) => {
         if (!cancelled) setAppointments(data?.appointments || []);
       })
@@ -35,7 +45,7 @@ const TodaysQueue: React.FC<TodaysQueueProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, refreshKey]);
+  }, [resolvedDoctorId, resolvedDate, refreshKey]);
 
   const byStatus = (a: Appointment, b: Appointment) => {
     const order = ['IN_PROGRESS', 'SCHEDULED', 'CONFIRMED', 'COMPLETED', 'NO_SHOW', 'CANCELLED'];
@@ -47,9 +57,11 @@ const TodaysQueue: React.FC<TodaysQueueProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>Today&apos;s queue</h3>
+      <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>
+        Queue for {resolvedDate === toLocalYmd() ? 'today' : resolvedDate}
+      </h3>
       {sorted.length === 0 ? (
-        <p style={{ color: '#6B7280', fontSize: 14 }}>No appointments for today.</p>
+        <p style={{ color: '#6B7280', fontSize: 14 }}>No appointments for {resolvedDate === toLocalYmd() ? 'today' : resolvedDate}.</p>
       ) : (
         sorted.map((apt) => {
           const kind = getOpdQueueRowKind(apt);
@@ -65,9 +77,18 @@ const TodaysQueue: React.FC<TodaysQueueProps> = ({
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 padding: '12px 16px',
-                border: `1px solid ${isHeld ? '#FCD34D' : '#E5E7EB'}`,
+                border: `2px solid ${
+                  apt.id === focusAppointmentId ? '#2563EB' : isHeld ? '#FCD34D' : '#E5E7EB'
+                }`,
                 borderRadius: '8px',
-                backgroundColor: isDone ? '#F9FAFB' : isHeld ? '#FFFBEB' : '#FFF',
+                backgroundColor:
+                  apt.id === focusAppointmentId
+                    ? '#EFF6FF'
+                    : isDone
+                      ? '#F9FAFB'
+                      : isHeld
+                        ? '#FFFBEB'
+                        : '#FFF',
                 cursor: 'pointer',
               }}
               onClick={() => onSelectAppointment(apt, kind)}

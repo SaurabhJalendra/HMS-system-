@@ -7,7 +7,7 @@ import type { CreatePatientRequest } from '../../lib/api/types';
 import { Gender } from '../../lib/api/types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
-import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly } from '../../lib/constants/patientFields';
+import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly, isTwelveDigitAadhar } from '../../lib/constants/patientFields';
 
 export type PatientRegistrationFormData = {
   name: string;
@@ -101,6 +101,8 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
         next = digitsOnly(value, 10);
       } else if (name === 'age') {
         next = digitsOnly(value, 3);
+      } else if (name === 'aadharCardNumber') {
+        next = digitsOnly(value, 12);
       }
       setFormData((prev) => ({ ...prev, [name]: next }));
     },
@@ -169,6 +171,11 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
       }
       if (!/^[0-9]{10}$/.test(formData.phone)) {
         setError('Phone number must be exactly 10 digits');
+        setIsSubmitting(false);
+        return;
+      }
+      if (formData.nationality === 'IN' && formData.aadharCardNumber && !isTwelveDigitAadhar(formData.aadharCardNumber)) {
+        setError('Aadhar card number must be exactly 12 digits');
         setIsSubmitting(false);
         return;
       }
@@ -323,6 +330,8 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
           <label className="block text-sm font-medium text-gray-700">Aadhar Card Number</label>
           <input
             type="text"
+            inputMode="numeric"
+            autoComplete="off"
             name="aadharCardNumber"
             value={formData.aadharCardNumber}
             onChange={handleInputChange}
@@ -333,7 +342,7 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
             className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <p className="mt-1 text-xs text-gray-500">
-            Unique 12-digit identity number (optional but recommended for Indian patients)
+            Unique 12-digit identity number (digits only; optional but recommended for Indian patients)
           </p>
         </div>
       ) : (
