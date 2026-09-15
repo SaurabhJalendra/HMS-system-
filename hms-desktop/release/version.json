@@ -1,10 +1,10 @@
 {
-  "version": "1.0.19",
-  "backendVersion": "1.0.19",
+  "version": "1.0.20",
+  "backendVersion": "1.0.20",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.19",
+  "latestDesktopVersion": "1.0.20",
   "releaseNotes": [
-    "Add reusable custom allergy and chronic-condition entries, multi-entry catalog modal, and special-character address support"
+    "NEW VERSION RELEASE FOR TESTING"
   ],
-  "publishedAt": "2026-09-15T10:29:07.018Z"
+  "publishedAt": "2026-09-15T11:05:40.185Z"
 }
