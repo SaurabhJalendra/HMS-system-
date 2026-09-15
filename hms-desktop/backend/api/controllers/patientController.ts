@@ -17,7 +17,11 @@ const ageToDateOfBirth = (age: number): Date => {
 
 // Validation schemas
 const patientCreateSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
+  name: z
+    .string()
+    .min(1, 'Name is required')
+    .max(100, 'Name too long')
+    .regex(/^[A-Za-z]+(?: [A-Za-z]+)*$/, 'Name can only contain letters and spaces'),
   dateOfBirth: z.union([
     z.string().refine((date) => {
     const dob = new Date(date);
@@ -49,10 +53,14 @@ const patientCreateSchema = z.object({
     .or(z.literal('')), // Allow empty string (Indian patients)
   passportNumber: z.union([
     z.string().min(6, 'Passport number must be at least 6 characters').max(20, 'Passport number too long')
-      .regex(/^[A-Za-z0-9\-]+$/, 'Passport number can only contain letters, numbers and hyphens'),
+      .regex(/^[A-Za-z0-9]+$/, 'Passport number can only contain letters and numbers'),
     z.literal('')
-  ]).optional(), // Allow empty (foreign patients use this when provided)
-  address: z.string().min(1, 'Address is required').max(500, 'Address too long'),
+  ]).optional(),
+  address: z
+    .string()
+    .min(1, 'Address is required')
+    .max(500, 'Address too long')
+    .regex(/^(?=.*[A-Za-z0-9])[A-Za-z0-9 ]+$/, 'Address can only contain letters, numbers, and spaces'),
   bloodGroup: z.string().trim().max(20, 'Blood group is too long').optional().or(z.literal('')),
   allergies: z.string().optional(),
   chronicConditions: z.string().optional(),

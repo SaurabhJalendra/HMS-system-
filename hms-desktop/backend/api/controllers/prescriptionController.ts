@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { PrismaClient, PrescriptionStatus } from '@prisma/client';
+import { PrismaClient, PrescriptionStatus, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { computeUnitsToDispenseForLine } from '../utils/prescriptionDispenseUnits';
@@ -26,6 +26,67 @@ const prescriptionCreateSchema = z.object({
   notes: z.string().optional(),
   items: z.array(prescriptionItemSchema).min(1, 'At least one medicine item is required'),
 });
+
+const prescriptionUpdateSchema = z.object({
+  notes: z.string().optional().nullable(),
+  items: z.array(prescriptionItemSchema).min(1, 'At least one medicine item is required'),
+});
+
+const prescriptionListInclude = {
+  patient: {
+    select: {
+      id: true,
+      name: true,
+      age: true,
+      dateOfBirth: true,
+      gender: true,
+      phone: true,
+    },
+  },
+  doctor: {
+    select: {
+      id: true,
+      fullName: true,
+      role: true,
+    },
+  },
+  prescriptionItems: {
+    include: {
+      medicine: {
+        select: {
+          id: true,
+          name: true,
+          genericName: true,
+          manufacturer: true,
+          price: true,
+          category: true,
+        },
+      },
+    },
+    orderBy: { rowOrder: 'asc' as const },
+  },
+};
+
+async function calculatePrescriptionTotal(
+  items: Array<{ medicineId: string; quantity: number; frequency: string; duration: number }>,
+): Promise<{ totalAmount: number; missingMedicineId?: string }> {
+  const medicineIds = [...new Set(items.map((item) => item.medicineId))];
+  const catalogRows = await prisma.medicineCatalog.findMany({
+    where: { id: { in: medicineIds } },
+    select: { id: true, price: true },
+  });
+  const priceById = new Map(catalogRows.map((row) => [row.id, Number(row.price)]));
+  for (const medicineId of medicineIds) {
+    if (!priceById.has(medicineId)) {
+      return { totalAmount: 0, missingMedicineId: medicineId };
+    }
+  }
+  let totalAmount = 0;
+  for (const item of items) {
+    totalAmount += (priceById.get(item.medicineId) || 0) * computeUnitsToDispenseForLine(item);
+  }
+  return { totalAmount: roundMoney(totalAmount) };
+}
 
 const prescriptionTemplateSchema = z.object({
   name: z.string().trim().min(1, 'Template name is required').max(100),
@@ -534,7 +595,137 @@ export const getPrescriptionById = async (req: AuthRequest, res: Response) => {
 };
 
 export const updatePrescription = async (req: AuthRequest, res: Response) => {
-  res.json({ success: true, data: { prescription: {} } });
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const role = req.user?.role;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
+    }
+
+    const validatedData = prescriptionUpdateSchema.parse(req.body);
+
+    const existingPrescription = await prisma.prescription.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        doctorId: true,
+        status: true,
+        prescriptionNumber: true,
+        notes: true,
+        totalAmount: true,
+        prescriptionItems: {
+          select: {
+            medicineId: true,
+            quantity: true,
+            frequency: true,
+            duration: true,
+          },
+        },
+      },
+    });
+
+    if (!existingPrescription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Prescription not found',
+      });
+    }
+
+    if (existingPrescription.status !== PrescriptionStatus.ACTIVE) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot edit a ${existingPrescription.status.toLowerCase()} prescription`,
+      });
+    }
+
+    if (role === UserRole.DOCTOR && existingPrescription.doctorId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only edit prescriptions you wrote',
+      });
+    }
+
+    const { totalAmount, missingMedicineId } = await calculatePrescriptionTotal(validatedData.items);
+    if (missingMedicineId) {
+      return res.status(404).json({
+        success: false,
+        message: `Medicine not found: ${missingMedicineId}`,
+      });
+    }
+
+    const prescription = await prisma.$transaction(async (tx) => {
+      await tx.prescriptionItem.deleteMany({
+        where: { prescriptionId: id },
+      });
+
+      return tx.prescription.update({
+        where: { id },
+        data: {
+          notes: validatedData.notes?.trim() ? validatedData.notes.trim() : null,
+          totalAmount,
+          prescriptionItems: {
+            create: validatedData.items.map((item, index) => ({
+              medicineId: item.medicineId,
+              quantity: item.quantity,
+              frequency: item.frequency,
+              duration: item.duration,
+              instructions: item.instructions || null,
+              dosage: item.dosage || null,
+              withFood: item.withFood || null,
+              startDate: item.startDate ? new Date(item.startDate) : null,
+              endDate: item.endDate ? new Date(item.endDate) : null,
+              rowOrder: index,
+            })),
+          },
+        },
+        include: prescriptionListInclude,
+      });
+    });
+
+    try {
+      await prisma.prescriptionAudit.create({
+        data: {
+          prescriptionId: prescription.id,
+          action: 'UPDATED',
+          performedBy: userId,
+          changes: {
+            previousItemCount: existingPrescription.prescriptionItems.length,
+            itemCount: prescription.prescriptionItems.length,
+            previousTotalAmount: existingPrescription.totalAmount,
+            totalAmount: prescription.totalAmount,
+            notes: prescription.notes,
+          },
+          notes: `Prescription ${existingPrescription.prescriptionNumber} updated`,
+        },
+      });
+    } catch (auditError) {
+      console.error('Failed to create prescription update audit log:', auditError);
+    }
+
+    res.json({
+      success: true,
+      data: { prescription },
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.issues,
+      });
+    }
+
+    console.error('Update prescription error:', error);
+    res.status(500).json({
+      success: false,
+      message: error?.message || 'Internal server error',
+    });
+  }
 };
 
 export const dispensePrescription = async (req: AuthRequest, res: Response) => {

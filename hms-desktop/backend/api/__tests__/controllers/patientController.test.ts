@@ -168,6 +168,52 @@ describe('Patient Controller', () => {
       expect(mockRes.status).toHaveBeenCalledWith(400);
     });
 
+    it('should reject a name with special characters', async () => {
+      mockReq.body = {
+        name: 'John@Doe',
+        gender: 'MALE',
+        phone: '1234567890',
+        address: '123 Main St',
+        age: 30,
+      };
+
+      await createPatient(mockReq as AuthRequest, mockRes as Response);
+
+      expect(mockPrisma.patient.create).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+
+    it('should reject a passport number with special characters', async () => {
+      mockReq.body = {
+        name: 'John Doe',
+        gender: 'MALE',
+        phone: '1234567890',
+        address: '123 Main St',
+        age: 30,
+        passportNumber: 'A12-34567',
+      };
+
+      await createPatient(mockReq as AuthRequest, mockRes as Response);
+
+      expect(mockPrisma.patient.create).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+
+    it('should reject an address with special characters', async () => {
+      mockReq.body = {
+        name: 'John Doe',
+        gender: 'MALE',
+        phone: '1234567890',
+        address: '12/A MG Road',
+        age: 30,
+      };
+
+      await createPatient(mockReq as AuthRequest, mockRes as Response);
+
+      expect(mockPrisma.patient.create).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+
     it('should validate required fields', async () => {
       const patientData = {
         name: '',

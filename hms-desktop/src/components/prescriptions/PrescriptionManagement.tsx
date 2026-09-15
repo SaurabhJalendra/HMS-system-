@@ -14,6 +14,8 @@ import { getInfoContent } from '../../lib/infoContent';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { calculateAge } from '../../lib/utils/ageCalculator';
 import { UserRole } from '../../lib/api/types';
+import { canEditPrescription } from '../../lib/utils/rolePermissions';
+import PrescriptionEditModal from './PrescriptionEditModal';
 
 const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
   const { formatCurrency: formatCurrencyUtil, config: hospitalConfig } = useHospitalConfig();
@@ -35,6 +37,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
   const [selectedPrescriptionForAudit, setSelectedPrescriptionForAudit] = useState(null);
 
   const [previewData, setPreviewData] = useState(null);
+  const [editingPrescriptionId, setEditingPrescriptionId] = useState(null);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -678,6 +681,14 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
                       },
                       'Print'
                     ),
+                    canEditPrescription(user?.role, prescription, user?.id) && React.createElement(
+                      'button',
+                      {
+                        onClick: () => setEditingPrescriptionId(prescription.id),
+                        className: 'text-teal-600 hover:text-teal-900'
+                      },
+                      'Edit'
+                    ),
                     (user?.role === 'PHARMACY' || user?.role === 'ADMIN') && React.createElement(
                       'button',
                       {
@@ -1070,6 +1081,16 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
 
       // Preview modal
       renderPreviewModal(),
+
+      editingPrescriptionId && React.createElement(PrescriptionEditModal, {
+        prescriptionId: editingPrescriptionId,
+        onClose: () => setEditingPrescriptionId(null),
+        onSaved: async () => {
+          setEditingPrescriptionId(null);
+          setSuccess('Prescription updated successfully.');
+          await Promise.all([loadPrescriptions(), loadStats()]);
+        },
+      }),
 
       // Medicine inventory audit modal
       showInventoryAudit && React.createElement(

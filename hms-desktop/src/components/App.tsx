@@ -397,7 +397,15 @@ const App: React.FC = () => {
       case 'ot':
         return React.createElement(OTManagement, { user, isAuthenticated, onBack: () => handleNavigation('dashboard') });
       case 'configuration':
-        return React.createElement(ConfigurationManagement, { user });
+        return React.createElement(ConfigurationManagement, {
+          user,
+          initialTab:
+            user.role === 'ADMIN'
+              ? currentAction === 'appUpdates'
+                ? 'updates'
+                : undefined
+              : 'updates',
+        });
       default:
         return React.createElement(RoleBasedDashboard, { 
           user, 

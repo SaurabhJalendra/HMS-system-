@@ -10,21 +10,25 @@ import AppUpdatePanel from './AppUpdatePanel';
 // Type for API response
 type ApiHospitalConfig = any;
 
-interface ConfigurationManagementProps {
-  user: any;
-}
-
 type TabType = 'profile' | 'bank' | 'updates';
 
-const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user }) => {
+interface ConfigurationManagementProps {
+  user: any;
+  initialTab?: TabType;
+}
+
+const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user, initialTab }) => {
   console.log('ConfigurationManagement: Component rendering, user=', user);
   const { refreshConfig } = useHospitalConfig();
+  const isAdmin = user?.role === 'ADMIN';
   const [config, setConfig] = useState<HospitalConfig | null>(null);
-  const [loading, setLoading] = useState<boolean>(true); // Start with true to show loading initially
+  const [loading, setLoading] = useState<boolean>(isAdmin); // Non-admin only needs App updates
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<TabType>('profile');
+  const [activeTab, setActiveTab] = useState<TabType>(
+    isAdmin ? (initialTab || 'profile') : 'updates'
+  );
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState<boolean>(false);
@@ -116,6 +120,14 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
   ];
 
   useEffect(() => {
+    if (!isAdmin) {
+      setActiveTab('updates');
+      setLoading(false);
+      return;
+    }
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
     console.log('ConfigurationManagement: Component mounted, loading config...');
     loadConfig();
     // Fallback: if loading takes too long, show the form anyway
@@ -125,7 +137,7 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
     }, 5000); // 5 second timeout
 
     return () => clearTimeout(timeout);
-  }, []);
+  }, [isAdmin, initialTab]);
 
   // Sync logo preview with profileData.logoUrl when it changes
   useEffect(() => {
@@ -701,11 +713,17 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
       <div style={{ maxWidth: '100%', margin: '0 auto' }}>
         {/* Header - Desktop style */}
         <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: '8px 12px', marginBottom: '8px' }}>
-          <h1 style={{ fontSize: '16px', fontWeight: '600', color: '#000000', margin: 0, marginBottom: '4px' }}>⚙️ Hospital Configuration</h1>
-          <p style={{ fontSize: '12px', color: '#666666', margin: 0 }}>Manage your hospital profile and invoice settings</p>
+          <h1 style={{ fontSize: '16px', fontWeight: '600', color: '#000000', margin: 0, marginBottom: '4px' }}>
+            {isAdmin ? 'Hospital Configuration' : 'App updates'}
+          </h1>
+          <p style={{ fontSize: '12px', color: '#666666', margin: 0 }}>
+            {isAdmin
+              ? 'Manage your hospital profile, invoice settings, and application updates'
+              : 'Check for a new ZenHosp version and install it on this computer'}
+          </p>
         </div>
 
-        {/* Tabs Navigation - Desktop style */}
+        {isAdmin && (
         <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', marginBottom: '8px' }}>
           <div className="border-b border-gray-200">
             <nav className="flex -mb-px" role="tablist">
@@ -719,7 +737,7 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
               >
-                🏥 Profile Setup
+                Profile Setup
               </button>
               <button
                 type="button"
@@ -731,7 +749,7 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
               >
-                🏦 Bank & Invoice Details
+                Bank & Invoice Details
               </button>
               <button
                 type="button"
@@ -743,11 +761,12 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
               >
-                ⬆️ App updates
+                App updates
               </button>
             </nav>
           </div>
         </div>
+        )}
 
         {/* Success/Error Messages */}
         {success && (
@@ -762,7 +781,7 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
         )}
 
         {/* Profile Setup Tab */}
-        {activeTab === 'profile' && (
+        {isAdmin && activeTab === 'profile' && (
           <form onSubmit={handleSaveProfile} className="space-y-6">
             {/* Hospital Profile Section */}
             <div className="bg-white rounded-lg shadow-sm p-6">
@@ -1344,7 +1363,7 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user 
         )}
 
         {/* Bank & Invoice Details Tab */}
-        {activeTab === 'bank' && (
+        {isAdmin && activeTab === 'bank' && (
           <form onSubmit={handleSaveBankDetails} className="space-y-6">
             {/* Tax Information */}
             <div className="bg-white rounded-lg shadow-sm p-6">
