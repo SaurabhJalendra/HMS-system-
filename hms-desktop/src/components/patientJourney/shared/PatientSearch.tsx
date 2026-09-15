@@ -1,12 +1,15 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import patientService from '../../../lib/api/services/patientService';
 import type { Patient } from '../../../lib/api/types';
 import PatientCard from './PatientCard';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { daysAgoYmd } from '../../../lib/utils/localDate';
+import { formatPatientNamePhone } from '../../../lib/utils/patientDisplay';
 
 const SEARCH_LIMIT = 50;
 const RECENT_DAYS = 5;
+const MIN_QUERY_LENGTH = 2;
+const DEBOUNCE_MS = 250;
 
 /**
  * Build API search string: normalize phone-style input (+91, spaces, dashes)
@@ -42,6 +45,8 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
   const [recentLoading, setRecentLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,9 +72,19 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
     };
   }, [recentDays]);
 
-  const handleSearch = useCallback(async () => {
-    const q = query.trim();
-    if (!q) {
+  useEffect(() => {
+    const onDocMouseDown = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
+  const runSearch = useCallback(async (raw: string) => {
+    const q = raw.trim();
+    if (q.length < MIN_QUERY_LENGTH) {
       setResults([]);
       setSearched(false);
       setError('');
@@ -86,6 +101,7 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
         page: 1,
       });
       setResults(patients || []);
+      setDropdownOpen(true);
     } catch (err: any) {
       console.error('Patient search error:', err);
       const msg =
@@ -97,59 +113,129 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, []);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < MIN_QUERY_LENGTH) {
+      setResults([]);
+      setSearched(false);
+      setError('');
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void runSearch(query);
+    }, DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [query, runSearch]);
+
+  const handleSelect = (patient: Patient) => {
+    onSelect(patient);
+    setQuery(formatPatientNamePhone(patient));
+    setDropdownOpen(false);
+    setSearched(true);
+    setResults([]);
+  };
 
   const showRecent = !searched && !query.trim();
+  const showDropdown = dropdownOpen && query.trim().length >= MIN_QUERY_LENGTH && !error;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            if (error) setError('');
-            if (!e.target.value.trim()) setSearched(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              handleSearch();
-            }
-          }}
-          placeholder={placeholder}
-          aria-label="Search patients"
-          style={{
-            flex: 1,
-            padding: '8px 12px',
-            border: '1px solid #D1D5DB',
-            borderRadius: '6px',
-            fontSize: 14,
-          }}
-        />
-        <button
-          type="button"
-          onClick={handleSearch}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#2563EB',
-            color: '#FFF',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 500,
-          }}
-        >
-          Search
-        </button>
+      <div ref={wrapRef} style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (error) setError('');
+              if (!e.target.value.trim()) {
+                setSearched(false);
+                setDropdownOpen(false);
+              } else {
+                setDropdownOpen(true);
+              }
+            }}
+            onFocus={() => {
+              if (query.trim().length >= MIN_QUERY_LENGTH) setDropdownOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void runSearch(query);
+              }
+              if (e.key === 'Escape') setDropdownOpen(false);
+            }}
+            placeholder={placeholder}
+            aria-label="Search patients"
+            aria-autocomplete="list"
+            autoComplete="off"
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              border: '1px solid #D1D5DB',
+              borderRadius: '6px',
+              fontSize: 14,
+            }}
+          />
+        </div>
+        {showDropdown && (
+          <div
+            role="listbox"
+            style={{
+              position: 'absolute',
+              zIndex: 20,
+              top: '100%',
+              left: 0,
+              right: 0,
+              marginTop: 4,
+              maxHeight: 240,
+              overflowY: 'auto',
+              backgroundColor: '#FFF',
+              border: '1px solid #D1D5DB',
+              borderRadius: 6,
+            }}
+          >
+            {loading && (
+              <div style={{ padding: 10, fontSize: 13, color: '#6B7280' }}>Searching…</div>
+            )}
+            {!loading && results.length === 0 && (
+              <div style={{ padding: 10, fontSize: 13, color: '#6B7280' }}>
+                No patients match “{query.trim()}”.
+              </div>
+            )}
+            {!loading &&
+              results.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="option"
+                  onClick={() => handleSelect(p)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '8px 12px',
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                  }}
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  {formatPatientNamePhone(p)}
+                </button>
+              ))}
+          </div>
+        )}
       </div>
       {error && (
         <p style={{ fontSize: 14, color: '#DC2626', margin: 0 }} role="alert">
           {error}
         </p>
       )}
-      {loading && <LoadingSpinner />}
+      {loading && !showDropdown && <LoadingSpinner />}
       {showRecent && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#111827' }}>
@@ -163,21 +249,8 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
           )}
           {!recentLoading &&
             recentPatients.map((p) => (
-              <PatientCard key={p.id} patient={p} compact onClick={() => onSelect(p)} />
+              <PatientCard key={p.id} patient={p} compact onClick={() => handleSelect(p)} />
             ))}
-        </div>
-      )}
-      {!loading && searched && !error && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {results.length === 0 ? (
-            <p style={{ fontSize: 14, color: '#6B7280' }}>
-              No patients found. Try another phone, name, or patient ID, or register a new patient.
-            </p>
-          ) : (
-            results.map((p) => (
-              <PatientCard key={p.id} patient={p} compact onClick={() => onSelect(p)} />
-            ))
-          )}
         </div>
       )}
     </div>

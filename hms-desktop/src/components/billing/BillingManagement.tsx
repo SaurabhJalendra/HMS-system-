@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
 import patientService from '../../lib/api/services/patientService';
@@ -11,10 +11,186 @@ import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
 import ProfitLossPanel from './ProfitLossPanel';
 import billingService from '../../lib/api/services/billingService';
+import { formatPatientNamePhone } from '../../lib/utils/patientDisplay';
+import type { Patient } from '../../lib/api/types';
+
+const PATIENT_SEARCH_LIMIT = 50;
+const PATIENT_SEARCH_DEBOUNCE_MS = 250;
+
+function PatientBillPicker({
+  selectedPatientId,
+  onSelect,
+}: {
+  selectedPatientId: string;
+  onSelect: (patient: Patient | null) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [matches, setMatches] = useState<Patient[]>([]);
+  const [selected, setSelected] = useState<Patient | null>(null);
+  const [open, setOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDocMouseDown = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (selected && formatPatientNamePhone(selected) === query) {
+      return;
+    }
+    if (q.length < 2) {
+      setMatches([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const digits = q.replace(/\D/g, '');
+        const search = /[a-zA-Z]/.test(q) ? q : digits.length >= 3 ? digits : q;
+        const { patients } = await patientService.getPatients({
+          search,
+          page: 1,
+          limit: PATIENT_SEARCH_LIMIT,
+        });
+        if (!cancelled) setMatches(patients || []);
+      } catch (e) {
+        console.error('Billing patient search failed', e);
+        if (!cancelled) setMatches([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, PATIENT_SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, selected]);
+
+  const pick = (patient: Patient) => {
+    setSelected(patient);
+    setQuery(formatPatientNamePhone(patient));
+    setMatches([]);
+    setOpen(false);
+    onSelect(patient);
+  };
+
+  const clear = () => {
+    setSelected(null);
+    setQuery('');
+    setMatches([]);
+    onSelect(null);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => {
+          const next = e.target.value;
+          setQuery(next);
+          setOpen(true);
+          if (selected && formatPatientNamePhone(selected) !== next) {
+            setSelected(null);
+            if (selectedPatientId) onSelect(null);
+          }
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search name or phone"
+        aria-label="Search patient by name or phone"
+        autoComplete="off"
+        style={{
+          width: '100%',
+          padding: '4px 8px',
+          border: '1px solid #C8C8C8',
+          borderRadius: '2px',
+          fontSize: '13px',
+          backgroundColor: '#FFFFFF',
+          boxSizing: 'border-box',
+        }}
+      />
+      {selected && (
+        <button
+          type="button"
+          onClick={clear}
+          style={{
+            position: 'absolute',
+            right: 4,
+            top: 4,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            fontSize: 12,
+            color: '#6B7280',
+          }}
+          aria-label="Clear selected patient"
+        >
+          Clear
+        </button>
+      )}
+      {open && query.trim().length >= 2 && (
+        <div
+          role="listbox"
+          style={{
+            position: 'absolute',
+            zIndex: 30,
+            top: '100%',
+            left: 0,
+            right: 0,
+            marginTop: 2,
+            maxHeight: 220,
+            overflowY: 'auto',
+            backgroundColor: '#FFFFFF',
+            border: '1px solid #C8C8C8',
+          }}
+        >
+          {searching && (
+            <div style={{ padding: '6px 8px', fontSize: 12, color: '#6B7280' }}>Searching…</div>
+          )}
+          {!searching && matches.length === 0 && (
+            <div style={{ padding: '6px 8px', fontSize: 12, color: '#6B7280' }}>
+              No patients match this name or phone.
+            </div>
+          )}
+          {!searching &&
+            matches.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(p)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '6px 8px',
+                  border: 'none',
+                  background: p.id === selectedPatientId ? '#E8F1FB' : 'transparent',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                }}
+              >
+                {formatPatientNamePhone(p)}
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; onBack?: () => void }) => {
   const { formatCurrency, config } = useHospitalConfig();
-  const [patients, setPatients] = useState([]);
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -39,18 +215,6 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
   const [taxPct, setTaxPct] = useState(0);
   const [activeSection, setActiveSection] = useState('consultation');
   const [showManualEntry, setShowManualEntry] = useState(false);
-
-  useEffect(() => {
-    // load a short list of patients for selection
-    (async () => {
-      try {
-        const res = await patientService.getPatients({ page: 1, limit: 200 });
-        setPatients(res.patients || []);
-      } catch (e) {
-        console.error('Failed to load patients', e);
-      }
-    })();
-  }, []);
 
   const inDateRange = (iso) => {
     if (!dateFrom && !dateTo) return true;
@@ -273,21 +437,53 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
   };
 
   const addManualItem = (section) => {
-    setSections(prev => ({
+    const id = `MANUAL-${section}-${Date.now()}-${Math.random()}`;
+    setShowManualEntry(true);
+    setSections((prev) => ({
       ...prev,
       [section]: {
         ...prev[section],
-        items: [...prev[section].items, {
-          id: `MANUAL-${section}-${Date.now()}-${Math.random()}`,
-          date: new Date().toISOString(),
-          description: '',
-          quantity: 1,
-          unitPrice: 0,
-          amount: 0,
-          manual: true
-        }]
-      }
+        items: [
+          ...prev[section].items,
+          {
+            id,
+            date: new Date().toISOString(),
+            description: '',
+            quantity: 1,
+            unitPrice: 0,
+            amount: 0,
+            manual: true,
+          },
+        ],
+      },
     }));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+
+  const getManualDescriptionPlaceholder = (section) => {
+    const hints = {
+      consultation: 'Required: what this is (e.g. Consultation – Dr. Sharma, follow-up visit)',
+      pharmacy: 'Required: medicine name (e.g. Paracetamol 500mg)',
+      labTests: 'Required: test name (e.g. CBC, Blood sugar)',
+      other: 'Required: what this charge is (e.g. Dressing, injection, procedure)',
+    };
+    return hints[section] || 'Required: describe this bill item';
+  };
+
+  const getIncompleteManualItems = () => {
+    const incomplete = [];
+    Object.entries(sections).forEach(([, section]) => {
+      section.items.forEach((item) => {
+        if (item.manual && selectedIds.has(item.id) && !String(item.description || '').trim()) {
+          incomplete.push(item.id);
+        }
+      });
+    });
+    return incomplete;
   };
 
   const updateManualItem = (section, id, field, value) => {
@@ -357,9 +553,9 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
 
   const mapSectionItems = (sectionKey) => ({
     items: sections[sectionKey].items
-      .filter((item) => selectedIds.has(item.id) && item.description)
+      .filter((item) => selectedIds.has(item.id) && String(item.description || '').trim())
       .map((item) => ({
-        description: item.description,
+        description: String(item.description || '').trim(),
         quantity: Number(item.quantity) || 0,
         unitPrice: Number(item.unitPrice) || 0,
         amount: Number(item.amount) || 0,
@@ -375,6 +571,13 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
       }
       if (!dateFrom) {
         setError('Start date is required to save a patient\'s bill');
+        return;
+      }
+
+      if (getIncompleteManualItems().length > 0) {
+        setError(
+          'Enter a description for every manually added item (consultation, medicine, lab test, or any other charge).'
+        );
         return;
       }
 
@@ -417,13 +620,21 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
 
   const printInvoice = async (printType = 'all') => {
     try {
-      setLoading(true);
       const patient = patients.find((p) => p.id === selectedPatientId);
 
       if (!patient) {
         setError('Please select a patient');
         return;
       }
+
+      if (getIncompleteManualItems().length > 0) {
+        setError(
+          'Enter a description for every manually added item (consultation, medicine, lab test, or any other charge).'
+        );
+        return;
+      }
+
+      setLoading(true);
 
       // Get selected items based on print type
       let selectedSections = {};
@@ -665,16 +876,10 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '8px', backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: '6px 8px', alignItems: 'end' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Patient name</label>
-              <select
-                value={selectedPatientId}
-                onChange={(e) => setSelectedPatientId(e.target.value)}
-                style={{ padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}
-              >
-                <option value="">Select patient</option>
-                {patients.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+              <PatientBillPicker
+                selectedPatientId={selectedPatientId}
+                onSelect={(patient) => setSelectedPatientId(patient?.id || '')}
+              />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Start date *</label>
@@ -828,6 +1033,11 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
             </div>
           </div>
 
+          {showManualEntry && (
+            <p className="mb-3 text-sm text-gray-600">
+              For each manually added item, enter a description of what it is — consultation, medicine, lab test, or any other charge.
+            </p>
+          )}
           {sections[activeSection].items.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <p>No items in {getSectionTitle(activeSection)} section</p>
@@ -848,7 +1058,9 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
                     <tr>
                       <th className="px-4 py-2 text-left w-12"></th>
                       <th className="px-4 py-2 text-left">Date</th>
-                      <th className="px-4 py-2 text-left">Description</th>
+                      <th className="px-4 py-2 text-left">
+                        Description{showManualEntry ? ' *' : ''}
+                      </th>
                       <th className="px-4 py-2 text-right">Qty</th>
                       <th className="px-4 py-2 text-right">Unit Price</th>
                       <th className="px-4 py-2 text-right">Amount</th>
@@ -871,13 +1083,21 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
                           {item.manual && showManualEntry ? (
                             <input
                               type="text"
+                              required
+                              aria-required="true"
                               value={item.description}
                               onChange={(e) => updateManualItem(activeSection, item.id, 'description', e.target.value)}
-                              className="w-full px-2 py-1 border border-gray-300 rounded"
-                              placeholder="Description"
+                              className={`w-full px-2 py-1 border rounded ${
+                                String(item.description || '').trim()
+                                  ? 'border-gray-300'
+                                  : 'border-red-400 bg-red-50'
+                              }`}
+                              placeholder={getManualDescriptionPlaceholder(activeSection)}
                             />
                           ) : (
-                            item.description
+                            item.description || (
+                              <span className="text-red-600">Description required</span>
+                            )
                           )}
                         </td>
                         <td className="px-4 py-2 text-right">

@@ -7,7 +7,7 @@ import type { CreatePatientRequest } from '../../lib/api/types';
 import { Gender } from '../../lib/api/types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
-import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly, isTwelveDigitAadhar } from '../../lib/constants/patientFields';
+import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly, isTwelveDigitAadhar, lettersAndSpacesOnly, alphanumericOnly, alphanumericAndSpaces, isLettersAndSpacesName, isAlphanumeric, isAlphanumericAndSpaces } from '../../lib/constants/patientFields';
 
 export type PatientRegistrationFormData = {
   name: string;
@@ -103,6 +103,12 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
         next = digitsOnly(value, 3);
       } else if (name === 'aadharCardNumber') {
         next = digitsOnly(value, 12);
+      } else if (name === 'name') {
+        next = lettersAndSpacesOnly(value, 100);
+      } else if (name === 'passportNumber') {
+        next = alphanumericOnly(value, 20);
+      } else if (name === 'address') {
+        next = alphanumericAndSpaces(value, 500);
       }
       setFormData((prev) => ({ ...prev, [name]: next }));
     },
@@ -169,6 +175,16 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
         setIsSubmitting(false);
         return;
       }
+      if (!isLettersAndSpacesName(formData.name)) {
+        setError('Patient name can only contain letters and spaces');
+        setIsSubmitting(false);
+        return;
+      }
+      if (!isAlphanumericAndSpaces(formData.address)) {
+        setError('Address can only contain letters, numbers, and spaces');
+        setIsSubmitting(false);
+        return;
+      }
       if (!/^[0-9]{10}$/.test(formData.phone)) {
         setError('Phone number must be exactly 10 digits');
         setIsSubmitting(false);
@@ -178,6 +194,18 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
         setError('Aadhar card number must be exactly 12 digits');
         setIsSubmitting(false);
         return;
+      }
+      if (formData.nationality === 'FOREIGN' && formData.passportNumber) {
+        if (!isAlphanumeric(formData.passportNumber)) {
+          setError('Passport number can only contain letters and numbers');
+          setIsSubmitting(false);
+          return;
+        }
+        if (formData.passportNumber.length < 6) {
+          setError('Passport number must be at least 6 characters');
+          setIsSubmitting(false);
+          return;
+        }
       }
 
       const bloodGroup =
@@ -260,8 +288,11 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
           required
           value={formData.name}
           onChange={handleInputChange}
+          placeholder="Letters only"
+          title="Patient name can only contain letters and spaces"
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        <p className="mt-1 text-xs text-gray-500">Letters and spaces only. Numbers and symbols are not allowed.</p>
       </div>
 
       <div>
@@ -353,11 +384,13 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
             name="passportNumber"
             value={formData.passportNumber}
             onChange={handleInputChange}
-            placeholder="Enter passport number (e.g. A1234567)"
+            placeholder="Letters and numbers only (e.g. A1234567)"
             maxLength={20}
+            pattern="[A-Za-z0-9]{6,20}"
+            title="Passport number can only contain letters and numbers"
             className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <p className="mt-1 text-xs text-gray-500">Passport number for foreign patients (optional)</p>
+          <p className="mt-1 text-xs text-gray-500">Alphanumeric only — no spaces or special characters.</p>
         </div>
       )}
 
@@ -369,8 +402,11 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
           rows={2}
           value={formData.address}
           onChange={handleInputChange}
+          placeholder="Letters, numbers, and spaces only"
+          title="Address can only contain letters, numbers, and spaces"
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        <p className="mt-1 text-xs text-gray-500">Letters, numbers, and spaces only. Special characters are not allowed.</p>
       </div>
 
       <div>

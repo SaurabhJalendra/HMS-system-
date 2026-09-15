@@ -12,6 +12,7 @@ import {
   roleUsesConsultationFee,
   getRoleQuickActions,
   shouldShowAvailableModules,
+  canEditPrescription,
 } from '../../lib/utils/rolePermissions';
 import { UserRole } from '../../lib/api/types';
 
@@ -31,8 +32,8 @@ describe('Role Permissions', () => {
       expect(modules).toContain('dashboard');
       expect(modules).toContain('patients');
       expect(modules).toContain('consultations');
+      expect(modules).toContain('configuration');
       expect(modules).not.toContain('users');
-      expect(modules).not.toContain('configuration');
     });
 
     it('should return appropriate modules for RECEPTIONIST', () => {
@@ -41,6 +42,7 @@ describe('Role Permissions', () => {
       expect(modules).toContain('patients');
       expect(modules).toContain('appointments');
       expect(modules).toContain('billing');
+      expect(modules).toContain('configuration');
     });
 
     it('should return empty array for unknown role', () => {
@@ -58,7 +60,7 @@ describe('Role Permissions', () => {
 
     it('should return false for DOCTOR accessing restricted modules', () => {
       expect(hasModuleAccess(UserRole.DOCTOR, 'users')).toBe(false);
-      expect(hasModuleAccess(UserRole.DOCTOR, 'configuration')).toBe(false);
+      expect(hasModuleAccess(UserRole.DOCTOR, 'configuration')).toBe(true);
     });
 
     it('should return true for DOCTOR accessing allowed modules', () => {
@@ -118,6 +120,33 @@ describe('Role Permissions', () => {
     });
   });
 
+  describe('canEditPrescription', () => {
+    const activeOwn = { status: 'ACTIVE', doctorId: 'doc-1' };
+
+    it('shows Edit for doctor on their own active prescription', () => {
+      expect(canEditPrescription(UserRole.DOCTOR, activeOwn, 'doc-1')).toBe(true);
+    });
+
+    it('hides Edit for doctor on another doctor\'s prescription', () => {
+      expect(canEditPrescription(UserRole.DOCTOR, activeOwn, 'doc-2')).toBe(false);
+    });
+
+    it('shows Edit for admin on any active prescription', () => {
+      expect(canEditPrescription(UserRole.ADMIN, activeOwn, 'admin-1')).toBe(true);
+    });
+
+    it('hides Edit for receptionist, pharmacy, and other roles', () => {
+      expect(canEditPrescription(UserRole.RECEPTIONIST, activeOwn, 'r1')).toBe(false);
+      expect(canEditPrescription(UserRole.PHARMACY, activeOwn, 'p1')).toBe(false);
+      expect(canEditPrescription(UserRole.NURSE, activeOwn, 'n1')).toBe(false);
+    });
+
+    it('hides Edit for dispensed or cancelled prescriptions', () => {
+      expect(canEditPrescription(UserRole.DOCTOR, { status: 'DISPENSED', doctorId: 'doc-1' }, 'doc-1')).toBe(false);
+      expect(canEditPrescription(UserRole.ADMIN, { status: 'CANCELLED', doctorId: 'doc-1' }, 'admin-1')).toBe(false);
+    });
+  });
+
   describe('roleUsesConsultationFee', () => {
     it('should be true for doctors and admins', () => {
       expect(roleUsesConsultationFee(UserRole.DOCTOR)).toBe(true);
@@ -155,9 +184,10 @@ describe('Role Permissions', () => {
     it('should include patients in lab tech quick actions', () => {
       const actions = getRoleQuickActions(UserRole.LAB_TECH);
       expect(actions.map((action) => action.module)).toEqual(
-        expect.arrayContaining(['labTests', 'patients'])
+        expect.arrayContaining(['labTests', 'patients', 'configuration'])
       );
       expect(actions.some((action) => action.name === 'Patients')).toBe(true);
+      expect(actions.some((action) => action.action === 'appUpdates')).toBe(true);
     });
 
     it('should send receptionist register and book actions to OPD Flow', () => {
@@ -166,10 +196,27 @@ describe('Role Permissions', () => {
       expect(actions.find((action) => action.name === 'Book Appointment')?.module).toBe('opdFlow');
     });
 
-    it('should hide available modules for lab technicians', () => {
+    it('hides available modules for lab technicians except via quick actions', () => {
       expect(shouldShowAvailableModules(UserRole.LAB_TECH)).toBe(false);
       expect(shouldShowAvailableModules(UserRole.ADMIN)).toBe(true);
       expect(shouldShowAvailableModules(UserRole.DOCTOR)).toBe(true);
+    });
+
+    it('gives every role access to configuration for app updates', () => {
+      const roles = [
+        UserRole.ADMIN,
+        UserRole.DOCTOR,
+        UserRole.RECEPTIONIST,
+        UserRole.LAB_TECH,
+        UserRole.PHARMACY,
+        UserRole.NURSE,
+        UserRole.WARD_MANAGER,
+        UserRole.NURSING_SUPERVISOR,
+      ];
+      roles.forEach((role) => {
+        expect(hasModuleAccess(role, 'configuration')).toBe(true);
+        expect(getRoleQuickActions(role).some((action) => action.action === 'appUpdates')).toBe(true);
+      });
     });
   });
 

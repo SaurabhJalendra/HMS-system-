@@ -10,28 +10,28 @@ export const rolePermissions = {
     canAccessFinancials: true,
   },
   [UserRole.DOCTOR]: {
-    modules: ['dashboard', 'opdFlow', 'patients', 'appointments', 'consultations', 'prescriptions', 'labTests', 'ipd', 'ot'],
+    modules: ['dashboard', 'opdFlow', 'patients', 'appointments', 'consultations', 'prescriptions', 'labTests', 'ipd', 'ot', 'configuration'],
     canManageUsers: false,
     canViewReports: true,
     canManageSystem: false,
     canAccessFinancials: false,
   },
   [UserRole.RECEPTIONIST]: {
-    modules: ['dashboard', 'opdFlow', 'patients', 'appointments', 'billing', 'ipd', 'ot'],
+    modules: ['dashboard', 'opdFlow', 'patients', 'appointments', 'billing', 'ipd', 'ot', 'configuration'],
     canManageUsers: false,
     canViewReports: true,
     canManageSystem: false,
     canAccessFinancials: true,
   },
   [UserRole.LAB_TECH]: {
-    modules: ['dashboard', 'patients', 'labTests'],
+    modules: ['dashboard', 'patients', 'labTests', 'configuration'],
     canManageUsers: false,
     canViewReports: false,
     canManageSystem: false,
     canAccessFinancials: false,
   },
   [UserRole.PHARMACY]: {
-    modules: ['dashboard', 'patients', 'prescriptions', 'medicines'],
+    modules: ['dashboard', 'patients', 'prescriptions', 'medicines', 'configuration'],
     canManageUsers: false,
     canViewReports: false,
     canManageSystem: false,
@@ -39,21 +39,21 @@ export const rolePermissions = {
   },
   // IPD-specific roles
   [UserRole.NURSE]: {
-    modules: ['dashboard', 'patients', 'ipd', 'ot'],
+    modules: ['dashboard', 'patients', 'ipd', 'ot', 'configuration'],
     canManageUsers: false,
     canViewReports: false,
     canManageSystem: false,
     canAccessFinancials: false,
   },
   [UserRole.WARD_MANAGER]: {
-    modules: ['dashboard', 'patients', 'ipd', 'ot'],
+    modules: ['dashboard', 'patients', 'ipd', 'ot', 'configuration'],
     canManageUsers: false,
     canViewReports: true,
     canManageSystem: false,
     canAccessFinancials: false,
   },
   [UserRole.NURSING_SUPERVISOR]: {
-    modules: ['dashboard', 'patients', 'ipd', 'ot'],
+    modules: ['dashboard', 'patients', 'ipd', 'ot', 'configuration'],
     canManageUsers: false,
     canViewReports: true,
     canManageSystem: false,
@@ -93,6 +93,25 @@ export const roleUsesConsultationFee = (userRole) => {
   return userRole === UserRole.DOCTOR || userRole === UserRole.ADMIN;
 };
 
+/** Doctors and admins may edit ACTIVE prescriptions. Doctors may edit only their own. */
+export const canEditPrescription = (
+  userRole: UserRole | string | undefined,
+  prescription: { status?: string; doctorId?: string | null; doctor?: { id?: string } | null },
+  userId?: string | null,
+): boolean => {
+  if (userRole !== UserRole.ADMIN && userRole !== UserRole.DOCTOR) {
+    return false;
+  }
+  if (prescription?.status !== 'ACTIVE') {
+    return false;
+  }
+  if (userRole === UserRole.ADMIN) {
+    return true;
+  }
+  const ownerId = prescription?.doctorId || prescription?.doctor?.id;
+  return Boolean(userId && ownerId && ownerId === userId);
+};
+
 // Get role-specific module definitions
 export const getRoleBasedModules = (userRole) => {
   const allModules = {
@@ -106,7 +125,11 @@ export const getRoleBasedModules = (userRole) => {
     medicines: { name: 'Medicines', icon: '💉', color: 'pink' },
     billing: { name: 'Billing', icon: '💰', color: 'indigo' },
     users: { name: 'Users', icon: '👤', color: 'gray' },
-    configuration: { name: 'Settings', icon: '⚙️', color: 'slate' },
+    configuration: {
+      name: userRole === UserRole.ADMIN ? 'Settings' : 'App Updates',
+      icon: '⚙️',
+      color: 'slate',
+    },
     ipd: { name: 'IPD Management', icon: '🏥', color: 'teal' },
     ot: { name: 'OT', icon: '🩺', color: 'orange' }
   };
@@ -144,34 +167,44 @@ export const shouldShowAvailableModules = (userRole) => {
   return userRole !== UserRole.LAB_TECH;
 };
 
+const appUpdatesAction = { name: 'App Updates', icon: '⬆️', action: 'appUpdates', module: 'configuration' };
+
 export const getRoleQuickActions = (userRole) => {
   const quickActions = {
     [UserRole.ADMIN]: [
       { name: 'Add User', icon: '👤', action: 'addUser', module: 'users' },
       { name: 'System Stats', icon: '📊', action: 'viewStats', module: 'dashboard' },
       { name: 'Backup Data', icon: '💾', action: 'backup', module: 'configuration' },
+      appUpdatesAction,
     ],
     [UserRole.DOCTOR]: [
       { name: 'Today\'s Appointments', icon: '📅', action: 'todayAppointments', module: 'appointments' },
       { name: 'Pending Consultations', icon: '🩺', action: 'pendingConsultations', module: 'consultations' },
       { name: 'Write Prescription', icon: '💊', action: 'newPrescription', module: 'prescriptions' },
+      appUpdatesAction,
     ],
     [UserRole.RECEPTIONIST]: [
       { name: 'Register Patient', icon: '👥', action: 'addPatient', module: 'opdFlow' },
       { name: 'Book Appointment', icon: '📅', action: 'bookAppointment', module: 'opdFlow' },
       { name: 'Generate Bill', icon: '💰', action: 'generateBill', module: 'billing' },
+      appUpdatesAction,
     ],
     [UserRole.LAB_TECH]: [
       { name: 'Patients', icon: '👥', action: 'viewPatients', module: 'patients' },
       { name: 'Pending Tests', icon: '🧪', action: 'pendingTests', module: 'labTests' },
       { name: 'Enter Results', icon: '📝', action: 'enterResults', module: 'labTests' },
       { name: 'Test Reports', icon: '📊', action: 'testReports', module: 'labTests' },
+      appUpdatesAction,
     ],
     [UserRole.PHARMACY]: [
       { name: 'Pending Prescriptions', icon: '💊', action: 'pendingPrescriptions', module: 'prescriptions' },
       { name: 'Dispense Medicine', icon: '💉', action: 'dispenseMedicine', module: 'medicines' },
       { name: 'Stock Alert', icon: '⚠️', action: 'stockAlert', module: 'medicines' },
+      appUpdatesAction,
     ],
+    [UserRole.NURSE]: [appUpdatesAction],
+    [UserRole.WARD_MANAGER]: [appUpdatesAction],
+    [UserRole.NURSING_SUPERVISOR]: [appUpdatesAction],
   };
 
   return quickActions[userRole] || [];

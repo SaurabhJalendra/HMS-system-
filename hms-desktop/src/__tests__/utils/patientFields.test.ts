@@ -5,6 +5,12 @@ import {
   digitsOnly,
   isTenDigitPhone,
   isTwelveDigitAadhar,
+  lettersAndSpacesOnly,
+  alphanumericOnly,
+  alphanumericAndSpaces,
+  isLettersAndSpacesName,
+  isAlphanumeric,
+  isAlphanumericAndSpaces,
 } from '../../lib/constants/patientFields';
 
 describe('patientFields', () => {
@@ -48,5 +54,24 @@ describe('patientFields', () => {
     expect(bloodGroupSelectValue('N.A')).toBe('N.A');
     expect(bloodGroupSelectValue('Bombay')).toBe('Other');
     expect(bloodGroupSelectValue('')).toBe('');
+  });
+
+  it('keeps letters and spaces in names and strips the rest', () => {
+    expect(lettersAndSpacesOnly('Himanshu Sharma!')).toBe('Himanshu Sharma');
+    expect(lettersAndSpacesOnly('Hima123')).toBe('Hima');
+    expect(isLettersAndSpacesName('Himanshu Sharma')).toBe(true);
+    expect(isLettersAndSpacesName('Himanshu-Sharma')).toBe(false);
+  });
+
+  it('keeps alphanumeric passport values only', () => {
+    expect(alphanumericOnly('A12-345/67')).toBe('A1234567');
+    expect(isAlphanumeric('A1234567')).toBe(true);
+    expect(isAlphanumeric('A12-345')).toBe(false);
+  });
+
+  it('keeps letters, numbers, and spaces in addresses', () => {
+    expect(alphanumericAndSpaces('12 MG Road, Pune!')).toBe('12 MG Road Pune');
+    expect(isAlphanumericAndSpaces('12 MG Road Pune')).toBe(true);
+    expect(isAlphanumericAndSpaces('12 MG Road, Pune')).toBe(false);
   });
 });
