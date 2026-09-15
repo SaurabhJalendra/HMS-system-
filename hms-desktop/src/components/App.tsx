@@ -307,8 +307,8 @@ const App: React.FC = () => {
   };
 
   const handleNavigation = (module: ModuleName, action: any = null): void => {
-    // Check if user has access to the module
-    if (user && hasModuleAccess(user.role, module)) {
+    const allowConfig = module === 'configuration';
+    if (user && (allowConfig || hasModuleAccess(user.role, module))) {
       const receptionistLike = user.role === 'RECEPTIONIST' || user.role === 'ADMIN';
       if (module === 'appointments' && receptionistLike) {
         setCurrentModule('opdFlow');
@@ -325,8 +325,8 @@ const App: React.FC = () => {
   const renderCurrentModule = (): React.ReactElement | null => {
     if (!user) return null;
 
-    // Check access before rendering
-    if (currentModule !== 'dashboard' && !hasModuleAccess(user.role, currentModule)) {
+    const configAllowed = currentModule === 'configuration';
+    if (currentModule !== 'dashboard' && !configAllowed && !hasModuleAccess(user.role, currentModule)) {
       return React.createElement(
         'div',
         { className: 'p-6 bg-red-50 border border-red-200 rounded-lg' },
@@ -692,7 +692,10 @@ const App: React.FC = () => {
           { style: { minHeight: '100vh', backgroundColor: '#F0F0F0', display: 'flex', flexDirection: 'column' } },
           renderNavigation(),
           React.createElement(VersionCompatibilityBanner, {
-            onNavigateToSettings: () => setCurrentModule('configuration'),
+            onNavigateToSettings: () => {
+              setCurrentModule('configuration');
+              setCurrentAction('appUpdates');
+            },
           }),
           React.createElement(
             'div',

@@ -69,8 +69,9 @@ describe('Role Permissions', () => {
       expect(hasModuleAccess(UserRole.DOCTOR, 'prescriptions')).toBe(true);
     });
 
-    it('should return false for unknown role', () => {
+    it('should return false for unknown role except app-updates configuration', () => {
       expect(hasModuleAccess('UNKNOWN_ROLE' as UserRole, 'dashboard')).toBe(false);
+      expect(hasModuleAccess('UNKNOWN_ROLE' as UserRole, 'configuration')).toBe(true);
     });
   });
 

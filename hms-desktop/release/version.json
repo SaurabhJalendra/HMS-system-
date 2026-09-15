@@ -1,10 +1,10 @@
 {
-  "version": "1.0.18",
-  "backendVersion": "1.0.18",
+  "version": "1.0.19",
+  "backendVersion": "1.0.19",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.18",
+  "latestDesktopVersion": "1.0.19",
   "releaseNotes": [
-    "App updates for all roles, OPD live patient search, registration field rules, billing patient picker"
+    "Add reusable custom allergy and chronic-condition entries, multi-entry catalog modal, and special-character address support"
   ],
-  "publishedAt": "2026-09-15T09:28:07.137Z"
+  "publishedAt": "2026-09-15T10:29:07.018Z"
 }

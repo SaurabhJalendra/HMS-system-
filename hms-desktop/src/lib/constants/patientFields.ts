@@ -27,21 +27,12 @@ export function alphanumericOnly(value: string, maxLength = 20): string {
   return value.replace(/[^A-Za-z0-9]/g, '').slice(0, maxLength);
 }
 
-/** Letters, digits, and spaces (address). */
-export function alphanumericAndSpaces(value: string, maxLength = 500): string {
-  return value.replace(/[^A-Za-z0-9\s]/g, '').slice(0, maxLength);
-}
-
 export function isLettersAndSpacesName(value: string): boolean {
   return /^[A-Za-z]+(?: [A-Za-z]+)*$/.test(value.trim());
 }
 
 export function isAlphanumeric(value: string): boolean {
   return /^[A-Za-z0-9]+$/.test(value);
-}
-
-export function isAlphanumericAndSpaces(value: string): boolean {
-  return /^(?=.*[A-Za-z0-9])[A-Za-z0-9 ]+$/.test(value.trim());
 }
 
 export function isTenDigitPhone(value: string): boolean {

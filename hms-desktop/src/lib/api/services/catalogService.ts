@@ -64,6 +64,21 @@ export interface PatientChronicCondition {
   condition: ChronicCondition;
 }
 
+export type CreateAllergyCatalogEntry = {
+  code?: string;
+  name: string;
+  category: string;
+  description?: string | null;
+};
+
+export type CreateChronicConditionCatalogEntry = {
+  code?: string;
+  name: string;
+  category: string;
+  icdCode?: string | null;
+  description?: string | null;
+};
+
 class CatalogService {
   private noCacheParams(params: Record<string, any> = {}) {
     return {
@@ -80,7 +95,7 @@ class CatalogService {
     return response.data.data;
   }
 
-  async addAllergy(allergy: Omit<Allergy, 'id' | 'isActive'>): Promise<{ allergy: Allergy }> {
+  async addAllergy(allergy: CreateAllergyCatalogEntry): Promise<{ allergy: Allergy }> {
     const response = await apiClient.post<ApiResponse<{ allergy: Allergy }>>('/catalog/allergies', allergy);
     return response.data.data;
   }
@@ -93,7 +108,7 @@ class CatalogService {
     return response.data.data;
   }
 
-  async addChronicCondition(condition: Omit<ChronicCondition, 'id' | 'isActive'>): Promise<{ condition: ChronicCondition }> {
+  async addChronicCondition(condition: CreateChronicConditionCatalogEntry): Promise<{ condition: ChronicCondition }> {
     const response = await apiClient.post<ApiResponse<{ condition: ChronicCondition }>>('/catalog/chronic-conditions', condition);
     return response.data.data;
   }

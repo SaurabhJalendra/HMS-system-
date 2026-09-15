@@ -26,11 +26,11 @@ router.use(authenticateToken);
 
 // ========== ALLERGY CATALOG ==========
 router.get('/allergies', getAllAllergies);
-router.post('/allergies', requireRole(UserRole.ADMIN, UserRole.DOCTOR), addAllergy);
+router.post('/allergies', requireRole(UserRole.ADMIN, UserRole.DOCTOR, UserRole.RECEPTIONIST), addAllergy);
 
 // ========== CHRONIC CONDITION CATALOG ==========
 router.get('/chronic-conditions', getAllChronicConditions);
-router.post('/chronic-conditions', requireRole(UserRole.ADMIN, UserRole.DOCTOR), addChronicCondition);
+router.post('/chronic-conditions', requireRole(UserRole.ADMIN, UserRole.DOCTOR, UserRole.RECEPTIONIST), addChronicCondition);
 
 // ========== DIAGNOSIS CATALOG ==========
 router.get('/diagnoses', getAllDiagnoses);

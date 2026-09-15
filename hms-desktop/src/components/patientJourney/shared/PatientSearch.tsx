@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import patientService from '../../../lib/api/services/patientService';
+import appointmentService from '../../../lib/api/services/appointmentService';
 import type { Patient } from '../../../lib/api/types';
-import PatientCard from './PatientCard';
+import { AppointmentStatus } from '../../../lib/api/types';
 import LoadingSpinner from '../../common/LoadingSpinner';
-import { daysAgoYmd } from '../../../lib/utils/localDate';
+import { daysAgoYmd, toLocalYmd } from '../../../lib/utils/localDate';
 import { formatPatientNamePhone } from '../../../lib/utils/patientDisplay';
 
 const SEARCH_LIMIT = 50;
@@ -11,10 +12,29 @@ const RECENT_DAYS = 5;
 const MIN_QUERY_LENGTH = 2;
 const DEBOUNCE_MS = 250;
 
-/**
- * Build API search string: normalize phone-style input (+91, spaces, dashes)
- * so it matches DB values that store plain digits. Keep full string for names / patient IDs.
- */
+const ACTIVE_APPOINTMENT_STATUSES = new Set<string>([
+  AppointmentStatus.SCHEDULED,
+  AppointmentStatus.CONFIRMED,
+  AppointmentStatus.IN_PROGRESS,
+]);
+
+const thStyle: React.CSSProperties = {
+  padding: '12px 16px',
+  textAlign: 'left',
+  fontSize: 12,
+  fontWeight: 500,
+  color: '#6B7280',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+};
+
+const tdStyle: React.CSSProperties = {
+  padding: '12px 16px',
+  fontSize: 14,
+  color: '#6B7280',
+  whiteSpace: 'nowrap',
+};
+
 function buildSearchTerm(raw: string): string {
   const t = raw.trim();
   if (!t) return '';
@@ -26,10 +46,44 @@ function buildSearchTerm(raw: string): string {
   return t;
 }
 
+function identityId(patient: Patient): string {
+  return patient.aadharCardNumber || patient.passportNumber || '-';
+}
+
+async function loadScheduledDoctors(patientIds: string[]): Promise<Record<string, string>> {
+  const map: Record<string, string> = {};
+  if (patientIds.length === 0) return map;
+  try {
+    const { appointments } = await appointmentService.getAppointments({
+      page: 1,
+      limit: 100,
+    });
+    const today = toLocalYmd(new Date());
+    const upcoming = (appointments || []).filter((apt) => {
+      if (!ACTIVE_APPOINTMENT_STATUSES.has(apt.status)) return false;
+      const aptDay = toLocalYmd(apt.date);
+      return !aptDay || aptDay >= today;
+    });
+    upcoming.sort((a, b) => {
+      const day = String(a.date).localeCompare(String(b.date));
+      if (day !== 0) return day;
+      return String(a.time || '').localeCompare(String(b.time || ''));
+    });
+    const wanted = new Set(patientIds);
+    upcoming.forEach((apt) => {
+      if (!wanted.has(apt.patientId) || map[apt.patientId]) return;
+      const name = apt.doctor?.fullName?.trim();
+      if (name) map[apt.patientId] = name;
+    });
+  } catch (err) {
+    console.error('Scheduled doctor lookup failed', err);
+  }
+  return map;
+}
+
 interface PatientSearchProps {
   onSelect: (patient: Patient) => void;
   placeholder?: string;
-  /** When set, list patients registered in this many recent days until the user searches. */
   recentDays?: number;
 }
 
@@ -46,31 +100,29 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [doctorByPatientId, setDoctorByPatientId] = useState<Record<string, string>>({});
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadRecent = useCallback(async () => {
     setRecentLoading(true);
-    patientService
-      .getPatients({
+    try {
+      const { patients } = await patientService.getPatients({
         createdFrom: daysAgoYmd(recentDays),
         limit: SEARCH_LIMIT,
         page: 1,
-      })
-      .then(({ patients }) => {
-        if (!cancelled) setRecentPatients(patients || []);
-      })
-      .catch((err: any) => {
-        console.error('Recent patients error:', err);
-        if (!cancelled) setRecentPatients([]);
-      })
-      .finally(() => {
-        if (!cancelled) setRecentLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+      setRecentPatients(patients || []);
+    } catch (err: any) {
+      console.error('Recent patients error:', err);
+      setRecentPatients([]);
+    } finally {
+      setRecentLoading(false);
+    }
   }, [recentDays]);
+
+  useEffect(() => {
+    void loadRecent();
+  }, [loadRecent]);
 
   useEffect(() => {
     const onDocMouseDown = (event: MouseEvent) => {
@@ -129,21 +181,32 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
     return () => window.clearTimeout(timer);
   }, [query, runSearch]);
 
+  const showingSearchResults = searched && query.trim().length >= MIN_QUERY_LENGTH;
+  const tablePatients = showingSearchResults ? results : recentPatients;
+  const tablePatientKey = tablePatients.map((p) => p.id).join('|');
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = tablePatientKey ? tablePatientKey.split('|') : [];
+    void loadScheduledDoctors(ids).then((map) => {
+      if (!cancelled) setDoctorByPatientId(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tablePatientKey]);
+
   const handleSelect = (patient: Patient) => {
     onSelect(patient);
-    setQuery(formatPatientNamePhone(patient));
     setDropdownOpen(false);
-    setSearched(true);
-    setResults([]);
   };
 
-  const showRecent = !searched && !query.trim();
   const showDropdown = dropdownOpen && query.trim().length >= MIN_QUERY_LENGTH && !error;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div ref={wrapRef} style={{ position: 'relative' }}>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 16 }}>
           <input
             type="text"
             value={query}
@@ -175,10 +238,46 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
               flex: 1,
               padding: '8px 12px',
               border: '1px solid #D1D5DB',
-              borderRadius: '6px',
+              borderRadius: 6,
               fontSize: 14,
             }}
           />
+          <button
+            type="button"
+            onClick={() => void runSearch(query)}
+            style={{
+              backgroundColor: '#4B5563',
+              color: '#FFF',
+              border: 'none',
+              borderRadius: 6,
+              padding: '8px 16px',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            Search
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setQuery('');
+              setSearched(false);
+              setResults([]);
+              setDropdownOpen(false);
+              void loadRecent();
+            }}
+            style={{
+              backgroundColor: '#2563EB',
+              color: '#FFF',
+              border: 'none',
+              borderRadius: 6,
+              padding: '8px 16px',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            Refresh
+          </button>
         </div>
         {showDropdown && (
           <div
@@ -212,6 +311,7 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
                   type="button"
                   role="option"
                   onClick={() => handleSelect(p)}
+                  onMouseDown={(e) => e.preventDefault()}
                   style={{
                     display: 'block',
                     width: '100%',
@@ -222,7 +322,6 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
                     cursor: 'pointer',
                     fontSize: 14,
                   }}
-                  onMouseDown={(e) => e.preventDefault()}
                 >
                   {formatPatientNamePhone(p)}
                 </button>
@@ -235,24 +334,70 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
           {error}
         </p>
       )}
-      {loading && !showDropdown && <LoadingSpinner />}
-      {showRecent && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#111827' }}>
-            Registered in the last {recentDays} days
-          </p>
-          {recentLoading && <LoadingSpinner />}
-          {!recentLoading && recentPatients.length === 0 && (
-            <p style={{ fontSize: 14, color: '#6B7280' }}>
-              No patients registered in the last {recentDays} days. Use search or register a new patient.
-            </p>
-          )}
-          {!recentLoading &&
-            recentPatients.map((p) => (
-              <PatientCard key={p.id} patient={p} compact onClick={() => handleSelect(p)} />
-            ))}
-        </div>
-      )}
+      <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#111827' }}>
+        {showingSearchResults
+          ? 'Search results'
+          : `Registered in the last ${recentDays} days`}
+      </p>
+      {(loading || recentLoading) && <LoadingSpinner />}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ minWidth: '100%', borderCollapse: 'collapse' }}>
+          <thead style={{ backgroundColor: '#F9FAFB' }}>
+            <tr>
+              <th style={thStyle}>Name</th>
+              <th style={thStyle}>Age</th>
+              <th style={thStyle}>Gender</th>
+              <th style={thStyle}>Phone</th>
+              <th style={thStyle}>ID (Aadhar/Passport)</th>
+              <th style={thStyle}>Blood Group</th>
+              <th style={thStyle}>Doctor</th>
+              <th style={thStyle}>Actions</th>
+            </tr>
+          </thead>
+          <tbody style={{ backgroundColor: '#FFF' }}>
+            {tablePatients.length === 0 ? (
+              <tr>
+                <td colSpan={8} style={{ ...tdStyle, textAlign: 'center', padding: 24 }}>
+                  {loading || recentLoading
+                    ? 'Loading...'
+                    : showingSearchResults
+                      ? 'No patients found for this search.'
+                      : `No patients registered in the last ${recentDays} days. Use search or register a new patient.`}
+                </td>
+              </tr>
+            ) : (
+              tablePatients.map((patient) => (
+                <tr key={patient.id} style={{ borderTop: '1px solid #E5E7EB' }}>
+                  <td style={{ ...tdStyle, color: '#111827', fontWeight: 500 }}>{patient.name || 'N/A'}</td>
+                  <td style={tdStyle}>{patient.age ?? 'N/A'}</td>
+                  <td style={tdStyle}>{patient.gender || 'N/A'}</td>
+                  <td style={tdStyle}>{patient.phone || 'N/A'}</td>
+                  <td style={tdStyle}>{identityId(patient)}</td>
+                  <td style={tdStyle}>{patient.bloodGroup || 'N/A'}</td>
+                  <td style={tdStyle}>{doctorByPatientId[patient.id] || '—'}</td>
+                  <td style={tdStyle}>
+                    <button
+                      type="button"
+                      onClick={() => handleSelect(patient)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: '#059669',
+                        textDecoration: 'underline',
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                      }}
+                    >
+                      Select
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
