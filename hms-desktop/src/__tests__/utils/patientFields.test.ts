@@ -7,10 +7,8 @@ import {
   isTwelveDigitAadhar,
   lettersAndSpacesOnly,
   alphanumericOnly,
-  alphanumericAndSpaces,
   isLettersAndSpacesName,
   isAlphanumeric,
-  isAlphanumericAndSpaces,
 } from '../../lib/constants/patientFields';
 
 describe('patientFields', () => {
@@ -69,9 +67,4 @@ describe('patientFields', () => {
     expect(isAlphanumeric('A12-345')).toBe(false);
   });
 
-  it('keeps letters, numbers, and spaces in addresses', () => {
-    expect(alphanumericAndSpaces('12 MG Road, Pune!')).toBe('12 MG Road Pune');
-    expect(isAlphanumericAndSpaces('12 MG Road Pune')).toBe(true);
-    expect(isAlphanumericAndSpaces('12 MG Road, Pune')).toBe(false);
-  });
 });

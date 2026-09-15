@@ -1,8 +1,12 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
+import { randomUUID } from 'node:crypto';
 
 const prisma = new PrismaClient();
+
+const cleanRequiredText = (value: unknown): string =>
+  typeof value === 'string' ? value.trim() : '';
 
 // ========== ALLERGY CATALOG ==========
 
@@ -23,6 +27,12 @@ export const getAllAllergies = async (req: AuthRequest, res: Response) => {
 export const addAllergy = async (req: AuthRequest, res: Response) => {
   try {
     const { code, name, category, description } = req.body;
+    const normalizedName = cleanRequiredText(name);
+    const normalizedDescription = cleanRequiredText(description);
+
+    if (!normalizedName) {
+      return res.status(400).json({ success: false, message: 'Allergy name is required' });
+    }
 
     // Standardize and validate category to prevent drift
     const allowedCategories = ['Food', 'Drug', 'Environmental', 'Chemical', 'Biological'] as const;
@@ -41,8 +51,25 @@ export const addAllergy = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const existing = await prisma.allergyCatalog.findFirst({
+      where: {
+        name: { equals: normalizedName, mode: 'insensitive' },
+        category: canonicalCategory,
+        isActive: true,
+      },
+    });
+    if (existing) {
+      return res.json({ success: true, data: { allergy: existing } });
+    }
+
     const allergy = await prisma.allergyCatalog.create({
-      data: { code, name, category: canonicalCategory, description: description || undefined, isActive: true },
+      data: {
+        code: cleanRequiredText(code) || `CUSTOM-ALLERGY-${randomUUID()}`,
+        name: normalizedName,
+        category: canonicalCategory,
+        description: normalizedDescription || undefined,
+        isActive: true,
+      },
     });
 
     res.json({ success: true, data: { allergy } });
@@ -71,9 +98,36 @@ export const getAllChronicConditions = async (req: AuthRequest, res: Response) =
 export const addChronicCondition = async (req: AuthRequest, res: Response) => {
   try {
     const { code, name, category, icdCode, description } = req.body;
+    const normalizedName = cleanRequiredText(name);
+    const normalizedCategory = cleanRequiredText(category);
+
+    if (!normalizedName || !normalizedCategory) {
+      return res.status(400).json({
+        success: false,
+        message: 'Disease name and type are required',
+      });
+    }
+
+    const existing = await prisma.chronicConditionCatalog.findFirst({
+      where: {
+        name: { equals: normalizedName, mode: 'insensitive' },
+        category: { equals: normalizedCategory, mode: 'insensitive' },
+        isActive: true,
+      },
+    });
+    if (existing) {
+      return res.json({ success: true, data: { condition: existing } });
+    }
 
     const condition = await prisma.chronicConditionCatalog.create({
-      data: { code, name, category, icdCode: icdCode || undefined, description: description || undefined, isActive: true },
+      data: {
+        code: cleanRequiredText(code) || `CUSTOM-CONDITION-${randomUUID()}`,
+        name: normalizedName,
+        category: normalizedCategory,
+        icdCode: cleanRequiredText(icdCode) || undefined,
+        description: cleanRequiredText(description) || undefined,
+        isActive: true,
+      },
     });
 
     res.json({ success: true, data: { condition } });

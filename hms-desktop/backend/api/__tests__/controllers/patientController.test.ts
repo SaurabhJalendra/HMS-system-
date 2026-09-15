@@ -199,19 +199,28 @@ describe('Patient Controller', () => {
       expect(mockRes.status).toHaveBeenCalledWith(400);
     });
 
-    it('should reject an address with special characters', async () => {
-      mockReq.body = {
+    it('should allow common special characters in an address', async () => {
+      const patientData = {
         name: 'John Doe',
         gender: 'MALE',
         phone: '1234567890',
-        address: '12/A MG Road',
+        address: 'Flat #12/A, M.G. Road (East)',
         age: 30,
       };
+      mockReq.body = patientData;
+      mockPrisma.patient.findUnique.mockResolvedValue(null);
+      mockPrisma.patient.create.mockResolvedValue({
+        id: 'john_doe_0000',
+        ...patientData,
+        dateOfBirth: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
 
       await createPatient(mockReq as AuthRequest, mockRes as Response);
 
-      expect(mockPrisma.patient.create).not.toHaveBeenCalled();
-      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockPrisma.patient.create).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(201);
     });
 
     it('should validate required fields', async () => {

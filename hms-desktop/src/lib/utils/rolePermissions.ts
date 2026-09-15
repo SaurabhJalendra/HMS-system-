@@ -68,6 +68,10 @@ export const getAvailableModules = (userRole) => {
 
 // Check if user has access to a specific module
 export const hasModuleAccess = (userRole, module) => {
+  // App updates live in configuration; every signed-in role may open that tab.
+  if (module === 'configuration') {
+    return true;
+  }
   const permissions = rolePermissions[userRole];
   return permissions ? permissions.modules.includes(module) : false;
 };

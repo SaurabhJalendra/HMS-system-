@@ -7,7 +7,20 @@ import type { CreatePatientRequest } from '../../lib/api/types';
 import { Gender } from '../../lib/api/types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
-import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly, isTwelveDigitAadhar, lettersAndSpacesOnly, alphanumericOnly, alphanumericAndSpaces, isLettersAndSpacesName, isAlphanumeric, isAlphanumericAndSpaces } from '../../lib/constants/patientFields';
+import {
+  BLOOD_GROUP_OPTIONS,
+  bloodGroupSelectValue,
+  digitsOnly,
+  isTwelveDigitAadhar,
+  lettersAndSpacesOnly,
+  alphanumericOnly,
+  isLettersAndSpacesName,
+  isAlphanumeric,
+} from '../../lib/constants/patientFields';
+import CustomCatalogEntryModal, {
+  type CustomAllergyEntry,
+  type CustomConditionEntry,
+} from './CustomCatalogEntryModal';
 
 export type PatientRegistrationFormData = {
   name: string;
@@ -69,6 +82,7 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
   const [catalogsLoading, setCatalogsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [customCatalogModal, setCustomCatalogModal] = useState<'allergy' | 'condition' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,8 +121,6 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
         next = lettersAndSpacesOnly(value, 100);
       } else if (name === 'passportNumber') {
         next = alphanumericOnly(value, 20);
-      } else if (name === 'address') {
-        next = alphanumericAndSpaces(value, 500);
       }
       setFormData((prev) => ({ ...prev, [name]: next }));
     },
@@ -155,6 +167,51 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
       .filter(Boolean)
       .map((a) => a!.name);
 
+  const saveCustomAllergies = async (entries: CustomAllergyEntry[]) => {
+    const responses = await Promise.all(
+      entries.map((entry) =>
+        catalogService.addAllergy({
+          name: entry.name,
+          category: entry.category,
+          description: entry.cause,
+        })
+      )
+    );
+    const saved = responses.map(({ allergy }) => allergy);
+    setAllergyCatalog((current) => {
+      const savedIds = new Set(saved.map((item) => item.id));
+      return [...current.filter((item) => !savedIds.has(item.id)), ...saved].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      );
+    });
+    setSelectedAllergies((current) => [
+      ...new Set([...current, ...saved.map((item) => item.id)]),
+    ]);
+    setAllergySearchTerm('');
+  };
+
+  const saveCustomConditions = async (entries: CustomConditionEntry[]) => {
+    const responses = await Promise.all(
+      entries.map((entry) =>
+        catalogService.addChronicCondition({
+          name: entry.name,
+          category: entry.category,
+        })
+      )
+    );
+    const saved = responses.map(({ condition }) => condition);
+    setConditionCatalog((current) => {
+      const savedIds = new Set(saved.map((item) => item.id));
+      return [...current.filter((item) => !savedIds.has(item.id)), ...saved].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      );
+    });
+    setSelectedConditions((current) => [
+      ...new Set([...current, ...saved.map((item) => item.id)]),
+    ]);
+    setConditionSearchTerm('');
+  };
+
   const handleNationalityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value as 'IN' | 'FOREIGN';
     setFormData((prev) => ({
@@ -177,11 +234,6 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
       }
       if (!isLettersAndSpacesName(formData.name)) {
         setError('Patient name can only contain letters and spaces');
-        setIsSubmitting(false);
-        return;
-      }
-      if (!isAlphanumericAndSpaces(formData.address)) {
-        setError('Address can only contain letters, numbers, and spaces');
         setIsSubmitting(false);
         return;
       }
@@ -402,11 +454,13 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
           rows={2}
           value={formData.address}
           onChange={handleInputChange}
-          placeholder="Letters, numbers, and spaces only"
-          title="Address can only contain letters, numbers, and spaces"
+          placeholder="Enter the complete address"
+          maxLength={500}
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <p className="mt-1 text-xs text-gray-500">Letters, numbers, and spaces only. Special characters are not allowed.</p>
+        <p className="mt-1 text-xs text-gray-500">
+          Letters, numbers, spaces, and address punctuation are allowed.
+        </p>
       </div>
 
       <div>
@@ -458,6 +512,14 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
         <div
           className="max-h-[200px] overflow-y-auto border border-gray-300 rounded p-3 bg-white"
         >
+          <button
+            type="button"
+            onClick={() => setCustomCatalogModal('allergy')}
+            className="w-full text-left mb-2 p-2 rounded border border-dashed border-blue-400 text-blue-700 bg-blue-50 hover:bg-blue-100"
+          >
+            <span className="font-medium">Other</span>
+            <span className="text-xs ml-2">Add one or more allergies to the catalog</span>
+          </button>
           {filteredAllergies.length === 0 ? (
             <div className="p-2 text-gray-500 text-center text-sm">
               {allergySearchTerm ? 'No allergies found matching your search.' : 'No allergies in catalog.'}
@@ -514,6 +576,14 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
           />
         </div>
         <div className="max-h-[200px] overflow-y-auto border border-gray-300 rounded p-3 bg-white">
+          <button
+            type="button"
+            onClick={() => setCustomCatalogModal('condition')}
+            className="w-full text-left mb-2 p-2 rounded border border-dashed border-blue-400 text-blue-700 bg-blue-50 hover:bg-blue-100"
+          >
+            <span className="font-medium">Other</span>
+            <span className="text-xs ml-2">Add one or more diseases to the catalog</span>
+          </button>
           {filteredConditions.length === 0 ? (
             <div className="p-2 text-gray-500 text-center text-sm">
               {conditionSearchTerm ? 'No conditions found matching your search.' : 'No conditions in catalog.'}
@@ -607,6 +677,21 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
           {isSubmitting ? 'Creating…' : submitLabel}
         </button>
       </div>
+
+      {customCatalogModal === 'allergy' && (
+        <CustomCatalogEntryModal
+          kind="allergy"
+          onClose={() => setCustomCatalogModal(null)}
+          onSave={saveCustomAllergies}
+        />
+      )}
+      {customCatalogModal === 'condition' && (
+        <CustomCatalogEntryModal
+          kind="condition"
+          onClose={() => setCustomCatalogModal(null)}
+          onSave={saveCustomConditions}
+        />
+      )}
     </form>
   );
 };

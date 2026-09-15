@@ -56,11 +56,7 @@ const patientCreateSchema = z.object({
       .regex(/^[A-Za-z0-9]+$/, 'Passport number can only contain letters and numbers'),
     z.literal('')
   ]).optional(),
-  address: z
-    .string()
-    .min(1, 'Address is required')
-    .max(500, 'Address too long')
-    .regex(/^(?=.*[A-Za-z0-9])[A-Za-z0-9 ]+$/, 'Address can only contain letters, numbers, and spaces'),
+  address: z.string().min(1, 'Address is required').max(500, 'Address too long'),
   bloodGroup: z.string().trim().max(20, 'Blood group is too long').optional().or(z.literal('')),
   allergies: z.string().optional(),
   chronicConditions: z.string().optional(),
