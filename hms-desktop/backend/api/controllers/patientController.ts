@@ -169,18 +169,8 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
       referredBy: patientData.referredBy?.trim() || undefined,
     };
 
-    // Check for duplicate phone number
-    const existingPatientByPhone = await prisma.patient.findUnique({
-      where: { phone: finalPatientData.phone },
-    });
-
-    if (existingPatientByPhone) {
-      return res.status(400).json({
-        success: false,
-        message: 'Patient with this phone number already exists',
-        data: { existingPatientId: existingPatientByPhone.id }
-      });
-    }
+    // Phone numbers are intentionally shared: family members and carers often
+    // register several patients against one contact number.
 
     // Check for duplicate Aadhar card number if provided
     if (finalPatientData.aadharCardNumber) {
@@ -481,20 +471,7 @@ export const updatePatient = async (req: AuthRequest, res: Response) => {
       updateData.age = calculateAge(validatedData.dateOfBirth);
     }
 
-    // Check for duplicate phone number if phone is being updated
-    if (updateData.phone && updateData.phone !== existingPatient.phone) {
-      const duplicatePatient = await prisma.patient.findUnique({
-        where: { phone: updateData.phone },
-      });
-
-      if (duplicatePatient) {
-        return res.status(400).json({
-          success: false,
-          message: 'Patient with this phone number already exists',
-          data: { existingPatientId: duplicatePatient.id }
-        });
-      }
-    }
+    // Phone numbers may be shared across patients, so no uniqueness check here.
 
     // Normalize empty ID strings to undefined for update
     if (updateData.aadharCardNumber !== undefined) updateData.aadharCardNumber = updateData.aadharCardNumber?.trim() || undefined;

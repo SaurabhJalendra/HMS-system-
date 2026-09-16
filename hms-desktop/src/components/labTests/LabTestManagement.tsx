@@ -8,6 +8,7 @@ import LabTestPDFGenerator from '../../lib/utils/labTestPDFGenerator';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { formatCurrencySync, getCurrencySymbol } from '../../lib/utils/currencyAndTimezone';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
+import { isAdminLevelRole } from '../../lib/utils/rolePermissions';
 
 const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
   const { displayCurrency } = useHospitalConfig();
@@ -983,7 +984,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
                       },
                       'Edit'
                     ),
-                    (test.status === 'PENDING' || test.status === 'IN_PROGRESS') && (user.role === 'LAB_TECH' || user.role === 'ADMIN') && React.createElement(
+                    (test.status === 'PENDING' || test.status === 'IN_PROGRESS') && (user.role === 'LAB_TECH' || isAdminLevelRole(user.role)) && React.createElement(
                       'button',
                       {
                         onClick: () => handleResultEntry(test),
@@ -991,7 +992,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
                       },
                       test.status === 'COMPLETED' ? 'View Results' : 'Enter Results'
                     ),
-                    (test.status === 'PENDING' || test.status === 'IN_PROGRESS') && (user.role === 'LAB_TECH' || user.role === 'ADMIN') && React.createElement(
+                    (test.status === 'PENDING' || test.status === 'IN_PROGRESS') && (user.role === 'LAB_TECH' || isAdminLevelRole(user.role)) && React.createElement(
                       'button',
                       {
                         onClick: () => handleCancelTest(test),
@@ -1144,7 +1145,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
                   } },
                   test.category
                 ),
-                (user.role === 'ADMIN' ?
+                (isAdminLevelRole(user.role) ?
                   React.createElement(
                     'div',
                     { style: { display: 'flex', alignItems: 'center', gap: '8px' } },

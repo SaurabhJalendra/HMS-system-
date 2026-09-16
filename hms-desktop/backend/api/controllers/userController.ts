@@ -3,7 +3,7 @@ import { logAudit } from '../utils/auditLogger';
 import { PrismaClient, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
-import { AuthRequest } from '../middleware/auth';
+import { ADMIN_LEVEL_ROLES, AuthRequest } from '../middleware/auth';
 import { roleStoresConsultationFee } from '../utils/hospitalHelper';
 
 const prisma = new PrismaClient();
@@ -83,10 +83,41 @@ const passwordResetSchema = z.object({
   newPassword: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
+/**
+ * SUBADMIN runs staff accounts but must not touch administrator-level ones or
+ * hand out administrator roles. Administrators are unrestricted.
+ *
+ * @returns an error message, or null when the action is allowed.
+ */
+const adminAccountGuardError = (
+  actorRole: UserRole,
+  targetRole?: UserRole | null,
+  requestedRole?: UserRole | null
+): string | null => {
+  if (actorRole === UserRole.ADMIN) return null;
+
+  if (targetRole && ADMIN_LEVEL_ROLES.includes(targetRole)) {
+    return 'Only an administrator can manage administrator accounts.';
+  }
+  if (requestedRole && ADMIN_LEVEL_ROLES.includes(requestedRole)) {
+    return 'Only an administrator can assign the administrator or sub-administrator role.';
+  }
+  return null;
+};
+
 // Create new user
 export const createUser = async (req: AuthRequest, res: Response) => {
   try {
     const validatedData = userCreateSchema.parse(req.body);
+
+    const roleGuardError = adminAccountGuardError(
+      req.user!.role,
+      null,
+      validatedData.role
+    );
+    if (roleGuardError) {
+      return res.status(403).json({ success: false, message: roleGuardError });
+    }
 
     // Check if username already exists
     const existingUser = await prisma.user.findUnique({
@@ -284,6 +315,15 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const roleGuardError = adminAccountGuardError(
+      req.user!.role,
+      existingUser.role,
+      validatedData.role
+    );
+    if (roleGuardError) {
+      return res.status(403).json({ success: false, message: roleGuardError });
+    }
+
     // Prevent admin from deactivating themselves
     if (id === req.user!.id && validatedData.isActive === false) {
       return res.status(400).json({
@@ -410,6 +450,11 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const roleGuardError = adminAccountGuardError(req.user!.role, existingUser.role);
+    if (roleGuardError) {
+      return res.status(403).json({ success: false, message: roleGuardError });
+    }
+
     // Prevent admin from deleting themselves
     if (id === req.user!.id) {
       return res.status(400).json({
@@ -508,6 +553,11 @@ export const resetUserPassword = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const roleGuardError = adminAccountGuardError(req.user!.role, existingUser.role);
+    if (roleGuardError) {
+      return res.status(403).json({ success: false, message: roleGuardError });
+    }
+
     // Hash new password
     const saltRounds = parseInt(process.env['BCRYPT_ROUNDS'] || '12');
     const passwordHash = await bcrypt.hash(validatedData.newPassword, saltRounds);
@@ -563,6 +613,11 @@ export const toggleUserStatus = async (req: AuthRequest, res: Response) => {
         success: false,
         message: 'User not found',
       });
+    }
+
+    const roleGuardError = adminAccountGuardError(req.user!.role, existingUser.role);
+    if (roleGuardError) {
+      return res.status(403).json({ success: false, message: roleGuardError });
     }
 
     // Prevent admin from deactivating themselves

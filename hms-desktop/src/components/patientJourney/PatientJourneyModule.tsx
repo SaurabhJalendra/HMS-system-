@@ -11,6 +11,7 @@ import ConsultationForm from './doctor/ConsultationForm';
 import PrescriptionWriter from './doctor/PrescriptionWriter';
 import type { OpdQueueRowKind } from './doctor/opdQueueHelpers';
 import { toLocalYmd } from '../../lib/utils/localDate';
+import { isAdminLevelRole } from '../../lib/utils/rolePermissions';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
 
@@ -47,8 +48,10 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
   const [fromQueueDirectToPrescription, setFromQueueDirectToPrescription] = useState(false);
   const [queueRefreshKey, setQueueRefreshKey] = useState(0);
 
-  const isReceptionist = role === UserRole.RECEPTIONIST || role === UserRole.ADMIN;
-  const isDoctor = role === UserRole.DOCTOR || role === UserRole.ADMIN;
+  // SUBADMIN mirrors ADMIN: it can drive both the reception and doctor halves of OPD
+  const isAdminLevel = isAdminLevelRole(role);
+  const isReceptionist = role === UserRole.RECEPTIONIST || isAdminLevel;
+  const isDoctor = role === UserRole.DOCTOR || isAdminLevel;
   const receptionistMode: 'search' | 'new' = isAddPatient ? 'new' : 'search';
   const queueDate = isConsultQueue
     ? toLocalYmd(initialAction?.appointmentDate || initialAction?.date)
@@ -56,8 +59,8 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
   const focusAppointmentId = isConsultQueue ? initialAction?.appointmentId : undefined;
   const queueDoctorId = isConsultQueue ? initialAction?.doctorId : undefined;
 
-  const showReceptionistSection = isReceptionist && !isConsultQueue && (role !== UserRole.DOCTOR || role === UserRole.ADMIN);
-  const showDoctorSection = isDoctor && !isAddPatient && !isBookAppointment && (role !== UserRole.RECEPTIONIST || role === UserRole.ADMIN);
+  const showReceptionistSection = isReceptionist && !isConsultQueue && (role !== UserRole.DOCTOR || isAdminLevel);
+  const showDoctorSection = isDoctor && !isAddPatient && !isBookAppointment && (role !== UserRole.RECEPTIONIST || isAdminLevel);
 
   const handleReceptionistPatientReady = (patient: Patient) => {
     setReceptionistPatient(patient);
@@ -175,9 +178,10 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
       </div>
 
       <div style={{ padding: 24, flex: 1 }}>
-        {role === UserRole.ADMIN && (
+        {isAdminLevel && (
           <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '8px', fontSize: 14 }}>
-            You are logged in as Admin. Use the tabs below to act as Receptionist or Doctor flow.
+            You are logged in as {role === UserRole.ADMIN ? 'Admin' : 'Sub-Admin'}. Use the
+            tabs below to act as Receptionist or Doctor flow.
           </div>
         )}
 

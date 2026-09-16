@@ -248,6 +248,8 @@ export interface PaginatedResponse<T> {
 // User Types
 export enum UserRole {
   ADMIN = 'ADMIN',
+  /** Deputy administrator: everything ADMIN can do except configuration and admin accounts. */
+  SUBADMIN = 'SUBADMIN',
   DOCTOR = 'DOCTOR',
   NURSE = 'NURSE',
   LAB_TECH = 'LAB_TECH',

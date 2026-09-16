@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLogger';
@@ -112,22 +112,30 @@ export const createBill = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Calculate section subtotals
-    const sections = validatedData.items;
-    
-    // Calculate subtotal for each section
-    sections.consultation.subtotal = sections.consultation.items.reduce(
-      (sum, item) => sum + item.amount, 0
-    );
-    sections.pharmacy.subtotal = sections.pharmacy.items.reduce(
-      (sum, item) => sum + item.amount, 0
-    );
-    sections.labTests.subtotal = sections.labTests.items.reduce(
-      (sum, item) => sum + item.amount, 0
-    );
-    sections.other.subtotal = sections.other.items.reduce(
-      (sum, item) => sum + item.amount, 0
-    );
+    // Recompute every subtotal here rather than trusting the client. Sections are
+    // rebuilt into a new object because the schema's `.default()` section objects
+    // are shared across requests — mutating them in place leaks totals between bills.
+    const sumAmounts = (items: { amount: number }[]) =>
+      items.reduce((total, item) => total + item.amount, 0);
+
+    const sections = {
+      consultation: {
+        items: validatedData.items.consultation.items,
+        subtotal: sumAmounts(validatedData.items.consultation.items),
+      },
+      pharmacy: {
+        items: validatedData.items.pharmacy.items,
+        subtotal: sumAmounts(validatedData.items.pharmacy.items),
+      },
+      labTests: {
+        items: validatedData.items.labTests.items,
+        subtotal: sumAmounts(validatedData.items.labTests.items),
+      },
+      other: {
+        items: validatedData.items.other.items,
+        subtotal: sumAmounts(validatedData.items.other.items),
+      },
+    };
 
     // Calculate total
     const subtotal = 
@@ -206,6 +214,19 @@ export const createBill = async (req: AuthRequest, res: Response) => {
         errors: error.issues,
       });
     }
+
+    // A bare "Internal server error" previously hid schema drift here (bills
+    // lacked the invoice_number column), so name the database fault instead.
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      console.error(`Create bill error (Prisma ${error.code}):`, error.message);
+      return res.status(500).json({
+        success: false,
+        message:
+          `Could not save the bill (database error ${error.code}). ` +
+          'If this persists, apply pending database migrations and retry.',
+      });
+    }
+
     console.error('Create bill error:', error);
     res.status(500).json({
       success: false,

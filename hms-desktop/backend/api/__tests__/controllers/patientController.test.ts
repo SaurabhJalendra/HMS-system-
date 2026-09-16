@@ -258,11 +258,12 @@ describe('Patient Controller', () => {
         updatedAt: new Date(),
       };
 
-      // 1) Existing patient lookup by id
-      mockPrisma.patient.findUnique
-        .mockResolvedValueOnce({ id: 'patient-1', phone: '1111111111' } as any)
-        // 2) Duplicate phone check
-        .mockResolvedValueOnce(null);
+      // Existing patient lookup by id. Phone is deliberately not unique, so
+      // changing it triggers no duplicate check.
+      mockPrisma.patient.findUnique.mockResolvedValueOnce({
+        id: 'patient-1',
+        phone: '1111111111',
+      } as any);
       mockPrisma.patient.update.mockResolvedValue(mockUpdatedPatient as any);
 
       await updatePatient(mockReq as AuthRequest, mockRes as Response);

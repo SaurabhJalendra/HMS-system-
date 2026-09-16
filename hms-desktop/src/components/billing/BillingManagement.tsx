@@ -12,6 +12,7 @@ import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/num
 import ProfitLossPanel from './ProfitLossPanel';
 import billingService from '../../lib/api/services/billingService';
 import { formatPatientNamePhone } from '../../lib/utils/patientDisplay';
+import { isAdminLevelRole } from '../../lib/utils/rolePermissions';
 import type { Patient } from '../../lib/api/types';
 
 const PATIENT_SEARCH_LIMIT = 50;
@@ -192,6 +193,8 @@ function PatientBillPicker({
 const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; onBack?: () => void }) => {
   const { formatCurrency, config } = useHospitalConfig();
   const [selectedPatientId, setSelectedPatientId] = useState('');
+  /** Kept alongside the id because the invoice needs the patient's name, address and phone. */
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(false);
@@ -200,7 +203,8 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
   /** Non-blocking note after Load Items (e.g. one API failed but others succeeded) */
   const [loadNote, setLoadNote] = useState('');
   const [activePage, setActivePage] = useState('billing'); // 'billing' | 'pl'
-  const isAdmin = user?.role === 'ADMIN';
+  // Sub-admins share the admin view here, including Profit & Loss
+  const isAdmin = isAdminLevelRole(user?.role);
 
   // Section-wise items storage
   const [sections, setSections] = useState({
@@ -620,7 +624,7 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
 
   const printInvoice = async (printType = 'all') => {
     try {
-      const patient = patients.find((p) => p.id === selectedPatientId);
+      const patient = selectedPatient;
 
       if (!patient) {
         setError('Please select a patient');
@@ -690,7 +694,11 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
 
       const hasSelectedItems = Object.values(selectedSections).some(s => s.items.length > 0);
       if (!hasSelectedItems) {
-        setError('No items to print. Please select at least one item.');
+        setError(
+          printType === 'all'
+            ? 'No items to print. Load a patient\'s billable items first.'
+            : 'No items to print. Tick at least one row, then print again.'
+        );
         return;
       }
 
@@ -750,7 +758,7 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
       InvoicePDFGenerator.generateOPDBillPDF(invoiceData);
       setError('');
     } catch (err) {
-      setError('Failed to generate invoice');
+      setError(err?.message ? `Failed to generate invoice: ${err.message}` : 'Failed to generate invoice');
       console.error('Error generating invoice:', err);
     } finally {
       setLoading(false);
@@ -878,7 +886,10 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Patient name</label>
               <PatientBillPicker
                 selectedPatientId={selectedPatientId}
-                onSelect={(patient) => setSelectedPatientId(patient?.id || '')}
+                onSelect={(patient) => {
+                  setSelectedPatient(patient);
+                  setSelectedPatientId(patient?.id || '');
+                }}
               />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

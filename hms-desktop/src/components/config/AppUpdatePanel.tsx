@@ -11,14 +11,15 @@ import {
 } from "../../lib/api/services/versionService";
 
 /**
- * Always-on listener: when the main process finishes a quiet download,
- * close and install (no terminal). Waits if a patient task is in progress.
+ * Always-on listener for quiet downloads finished by the main process.
+ *
+ * Downloading is automatic; restarting is not. ZenHosp must never close itself
+ * while staff are mid-task, so installation waits for an explicit
+ * "Restart and install" click in App updates.
  */
 export const DesktopUpdateAutoInstaller: React.FC = () => {
-  const { isSafeToRestartForUpdate } = useUpdateSession();
   const updater = getZenHospUpdater();
   const [pendingInstall, setPendingInstall] = useState(false);
-  const installingRef = useRef(false);
 
   useEffect(() => {
     if (!updater) return;
@@ -29,18 +30,18 @@ export const DesktopUpdateAutoInstaller: React.FC = () => {
     });
   }, [updater]);
 
-  useEffect(() => {
-    if (!updater || !pendingInstall || !isSafeToRestartForUpdate || installingRef.current) {
-      return;
-    }
-    installingRef.current = true;
-    const timer = window.setTimeout(() => {
-      void updater.quitAndInstall();
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [updater, pendingInstall, isSafeToRestartForUpdate]);
+  if (!pendingInstall) return null;
 
-  return null;
+  return (
+    <div
+      role="status"
+      className="fixed bottom-4 right-4 z-50 max-w-sm rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-none"
+    >
+      An update is downloaded and ready. Open{" "}
+      <span className="font-medium">App updates</span> and click{" "}
+      <span className="font-medium">Restart and install</span> when you are ready.
+    </div>
+  );
 };
 
 type UiPhase =
@@ -113,8 +114,6 @@ const AppUpdatePanel: React.FC = () => {
   const [installMethod, setInstallMethod] = useState<InstallMethod>(null);
   const advertisedRef = useRef({ installed: "", github: "", api: "", feed: "" });
   const didAutoCheck = useRef(false);
-  const didScheduleQuitAndInstall = useRef(false);
-
   const updater = getZenHospUpdater();
 
   advertisedRef.current = {
@@ -362,27 +361,21 @@ const AppUpdatePanel: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [updater, isPackaged, installedVersion, handleCheck]);
 
-  const scheduleQuitAndInstall = useCallback(() => {
-    if (!updater || didScheduleQuitAndInstall.current) return;
-    if (!isSafeToRestartForUpdate) {
-      setMessage(
-        "Download complete. Finish the current task, then click Restart and install."
-      );
-      return;
-    }
-    didScheduleQuitAndInstall.current = true;
-    setMessage("Download complete. Closing ZenHosp to install the update…");
-    window.setTimeout(() => {
-      void updater.quitAndInstall();
-    }, 700);
-  }, [updater, isSafeToRestartForUpdate]);
+  /**
+   * The update is staged, not applied. ZenHosp stays open until the user clicks
+   * "Restart and install", so an update can never interrupt work in progress.
+   */
+  const announceReadyToInstall = useCallback(() => {
+    setMessage(
+      "Download complete. ZenHosp will keep running — click Restart and install when you are ready."
+    );
+  }, []);
 
   const handleDownload = useCallback(async () => {
     if (!updater) return;
     setPhase("downloading");
     setDownloadPercent(0);
     setInstallMethod(null);
-    didScheduleQuitAndInstall.current = false;
     const res = await updater.downloadUpdate();
     if (!res.ok) {
       if (updater.installFromGitHub && githubHasInstaller) {
@@ -390,7 +383,7 @@ const AppUpdatePanel: React.FC = () => {
         if (fallback.ok) {
           setInstallMethod("github-installer");
           setPhase("ready");
-          scheduleQuitAndInstall();
+          announceReadyToInstall();
           return;
         }
         setPhase("error");
@@ -405,13 +398,12 @@ const AppUpdatePanel: React.FC = () => {
       setInstallMethod("github-installer");
     }
     setPhase("ready");
-    scheduleQuitAndInstall();
-  }, [updater, githubHasInstaller, scheduleQuitAndInstall]);
+    announceReadyToInstall();
+  }, [updater, githubHasInstaller, announceReadyToInstall]);
 
   const handleRestart = useCallback(async () => {
     if (!updater) return;
     if (!isSafeToRestartForUpdate) return;
-    didScheduleQuitAndInstall.current = true;
     await updater.quitAndInstall();
   }, [updater, isSafeToRestartForUpdate]);
 

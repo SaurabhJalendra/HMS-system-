@@ -1,10 +1,10 @@
 {
-  "version": "1.0.20",
-  "backendVersion": "1.0.20",
+  "version": "1.0.21",
+  "backendVersion": "1.0.21",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.20",
+  "latestDesktopVersion": "1.0.21",
   "releaseNotes": [
-    "NEW VERSION RELEASE FOR TESTING"
+    "Duplicate patient phone numbers; block past-time same-day appointments; fix bill save and Print Selected Only; add Sub-Admin role; updates install only on explicit restart"
   ],
-  "publishedAt": "2026-09-15T11:05:40.185Z"
+  "publishedAt": "2026-09-16T09:32:18.153Z"
 }

@@ -4,6 +4,7 @@ import expenseService from '../../lib/api/services/expenseService';
 import userService from '../../lib/api/services/userService';
 import { ExpenseCategory, PaymentStatus, ProfitLossReport, User } from '../../lib/api/types';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
+import { isAdminLevelRole } from '../../lib/utils/rolePermissions';
 
 function yyyyMm(date = new Date()) {
   const y = date.getFullYear();
@@ -49,7 +50,7 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
   const [miscDate, setMiscDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [miscStatus, setMiscStatus] = useState<PaymentStatus>(PaymentStatus.PAID);
 
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = isAdminLevelRole(user?.role);
 
   const loadReport = async () => {
     setLoading(true);

@@ -9,6 +9,15 @@ export const rolePermissions = {
     canManageSystem: true,
     canAccessFinancials: true,
   },
+  // Deputy administrator: the same modules as ADMIN, but hospital configuration
+  // and administrator accounts stay out of reach.
+  [UserRole.SUBADMIN]: {
+    modules: ['dashboard', 'opdFlow', 'patients', 'appointments', 'consultations', 'prescriptions', 'labTests', 'medicines', 'billing', 'users', 'configuration', 'ipd', 'ot'],
+    canManageUsers: true,
+    canViewReports: true,
+    canManageSystem: false,
+    canAccessFinancials: true,
+  },
   [UserRole.DOCTOR]: {
     modules: ['dashboard', 'opdFlow', 'patients', 'appointments', 'consultations', 'prescriptions', 'labTests', 'ipd', 'ot', 'configuration'],
     canManageUsers: false,
@@ -97,19 +106,23 @@ export const roleUsesConsultationFee = (userRole) => {
   return userRole === UserRole.DOCTOR || userRole === UserRole.ADMIN;
 };
 
+/** ADMIN and SUBADMIN both carry administrator-level reach in the UI. */
+export const isAdminLevelRole = (userRole: UserRole | string | undefined): boolean =>
+  userRole === UserRole.ADMIN || userRole === UserRole.SUBADMIN;
+
 /** Doctors and admins may edit ACTIVE prescriptions. Doctors may edit only their own. */
 export const canEditPrescription = (
   userRole: UserRole | string | undefined,
   prescription: { status?: string; doctorId?: string | null; doctor?: { id?: string } | null },
   userId?: string | null,
 ): boolean => {
-  if (userRole !== UserRole.ADMIN && userRole !== UserRole.DOCTOR) {
+  if (!isAdminLevelRole(userRole) && userRole !== UserRole.DOCTOR) {
     return false;
   }
   if (prescription?.status !== 'ACTIVE') {
     return false;
   }
-  if (userRole === UserRole.ADMIN) {
+  if (isAdminLevelRole(userRole)) {
     return true;
   }
   const ownerId = prescription?.doctorId || prescription?.doctor?.id;
@@ -154,6 +167,7 @@ export const getRoleBasedModules = (userRole) => {
 export const getRoleDisplayInfo = (role) => {
   const roleInfo = {
     [UserRole.ADMIN]: { label: 'Administrator', icon: '👨‍💼', color: 'red' },
+    [UserRole.SUBADMIN]: { label: 'Sub-Administrator', icon: '🧑‍💼', color: 'orange' },
     [UserRole.DOCTOR]: { label: 'Doctor', icon: '👨‍⚕️', color: 'blue' },
     [UserRole.RECEPTIONIST]: { label: 'Receptionist', icon: '👩‍💼', color: 'green' },
     [UserRole.LAB_TECH]: { label: 'Lab Technician', icon: '🧪', color: 'purple' },
@@ -179,6 +193,11 @@ export const getRoleQuickActions = (userRole) => {
       { name: 'Add User', icon: '👤', action: 'addUser', module: 'users' },
       { name: 'System Stats', icon: '📊', action: 'viewStats', module: 'dashboard' },
       { name: 'Backup Data', icon: '💾', action: 'backup', module: 'configuration' },
+      appUpdatesAction,
+    ],
+    [UserRole.SUBADMIN]: [
+      { name: 'Add User', icon: '👤', action: 'addUser', module: 'users' },
+      { name: 'System Stats', icon: '📊', action: 'viewStats', module: 'dashboard' },
       appUpdatesAction,
     ],
     [UserRole.DOCTOR]: [
@@ -225,6 +244,14 @@ export const getRoleDashboardWidgets = (userRole) => {
       { type: 'recent', title: 'Recent Users', data: 'recentUsers' },
       { type: 'recent', title: 'Recent Patients', data: 'recentPatients' },
     ],
+    [UserRole.SUBADMIN]: [
+      { type: 'stats', title: 'System Overview', data: ['totalUsers', 'totalPatients', 'totalAppointments'] },
+      { type: 'chart', title: 'User Activity', data: 'userActivity' },
+      { type: 'alerts', title: 'System Alerts', data: 'systemAlerts' },
+      { type: 'recent', title: 'Recent Activities', data: 'recentActivities' },
+      { type: 'recent', title: 'Recent Users', data: 'recentUsers' },
+      { type: 'recent', title: 'Recent Patients', data: 'recentPatients' },
+    ],
     [UserRole.DOCTOR]: [
       { type: 'stats', title: 'My Overview', data: ['todayAppointments', 'pendingConsultations', 'totalPatients'] },
       { type: 'schedule', title: 'Today\'s Schedule', data: 'todaySchedule' },
@@ -259,6 +286,9 @@ export const getRoleDashboardWidgets = (userRole) => {
 export const ipdSubModulePermissions = {
   [UserRole.ADMIN]: {
     // Admin has access to all IPD sub-modules
+    subModules: ['dashboard', 'wards', 'beds', 'admissions', 'patientCare', 'nursingCare', 'discharge', 'billing'],
+  },
+  [UserRole.SUBADMIN]: {
     subModules: ['dashboard', 'wards', 'beds', 'admissions', 'patientCare', 'nursingCare', 'discharge', 'billing'],
   },
   [UserRole.DOCTOR]: {
@@ -303,6 +333,9 @@ export const getAvailableIPDSubModules = (userRole: UserRole): string[] => {
 // ===== OT SUB-MODULE PERMISSIONS =====
 export const otSubModulePermissions: Record<string, { subModules: string[] }> = {
   [UserRole.ADMIN]: {
+    subModules: ['dashboard', 'otRooms', 'surgeryScheduling', 'surgeryManagement', 'preOperativeCare', 'postOperativeCare', 'otStaffManagement', 'otInventory', 'otBilling'],
+  },
+  [UserRole.SUBADMIN]: {
     subModules: ['dashboard', 'otRooms', 'surgeryScheduling', 'surgeryManagement', 'preOperativeCare', 'postOperativeCare', 'otStaffManagement', 'otInventory', 'otBilling'],
   },
   [UserRole.DOCTOR]: {

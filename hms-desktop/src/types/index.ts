@@ -9,6 +9,7 @@
 
 export type UserRole = 
   | 'ADMIN' 
+  | 'SUBADMIN'
   | 'DOCTOR' 
   | 'LAB_TECH' 
   | 'PHARMACY' 

@@ -186,7 +186,8 @@ model Patient {
   age                   Int
   dateOfBirth           DateTime    @map("date_of_birth")
   gender                Gender
-  phone                 String      @unique
+  /// Not unique: several patients (e.g. a family) may share one contact number.
+  phone                 String
   aadharCardNumber      String?     @unique @map("aadhar_card_number") // Indian patients: 12-digit Aadhar
   passportNumber        String?     @unique @map("passport_number") // Foreign patients: passport number
   address               String
@@ -219,6 +220,7 @@ model Patient {
   // OT
   surgeries Surgery[]
 
+  @@index([phone])
   @@map("patients")
 }
 
@@ -1092,6 +1094,8 @@ model Expense {
 // Enums
 enum UserRole {
   ADMIN
+  // Same reach as ADMIN except hospital configuration and administrator accounts
+  SUBADMIN
   DOCTOR
   LAB_TECH
   PHARMACY
