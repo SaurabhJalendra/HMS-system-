@@ -104,6 +104,12 @@ const PrescriptionInventoryAudit: React.FC<PrescriptionInventoryAuditProps> = ({
                             ? 'Available'
                             : `Short by ${item.shortageUnits}`}
                         </span>
+                        {item.requiredAcrossPrescription > item.requiredUnits && (
+                          <div className="mt-1 text-xs text-gray-500">
+                            {item.requiredAcrossPrescription} total units across repeated
+                            lines for this medicine
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}

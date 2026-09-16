@@ -17,6 +17,64 @@ import { UserRole } from '../../lib/api/types';
 import { canEditPrescription, isAdminLevelRole } from '../../lib/utils/rolePermissions';
 import PrescriptionEditModal from './PrescriptionEditModal';
 
+interface PrescriptionCancellationModalProps {
+  prescriptionNumber?: string;
+  reason: string;
+  busy: boolean;
+  onReasonChange: (reason: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+const PrescriptionCancellationModal: React.FC<PrescriptionCancellationModalProps> = ({
+  prescriptionNumber,
+  reason,
+  busy,
+  onReasonChange,
+  onCancel,
+  onConfirm,
+}) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div className="mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+      <h2 className="text-lg font-semibold text-gray-900">Cancel prescription</h2>
+      <p className="mt-2 text-sm text-gray-600">
+        Cancel {prescriptionNumber || 'this prescription'}? This does not depend on
+        medicine stock and does not change inventory.
+      </p>
+      <label className="mt-4 block text-sm font-medium text-gray-700">
+        Cancellation reason *
+      </label>
+      <textarea
+        autoFocus
+        rows={3}
+        value={reason}
+        onChange={(event) => onReasonChange(event.target.value)}
+        disabled={busy}
+        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+        placeholder="Enter why this prescription is being cancelled"
+      />
+      <div className="mt-5 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 disabled:opacity-50"
+        >
+          Keep prescription
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy || !reason.trim()}
+          className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? 'Cancelling…' : 'Cancel prescription'}
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
 const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
   const { formatCurrency: formatCurrencyUtil, config: hospitalConfig } = useHospitalConfig();
   const [activeTab, setActiveTab] = useState('list'); // 'list', 'stats'
@@ -38,6 +96,9 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
 
   const [previewData, setPreviewData] = useState(null);
   const [editingPrescriptionId, setEditingPrescriptionId] = useState(null);
+  const [cancellingPrescription, setCancellingPrescription] = useState(null);
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [cancellationBusy, setCancellationBusy] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -188,9 +249,13 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
         setSuccess('✅ Prescription dispensed successfully!');
         await refreshAfterStatusChange(response.prescription);
       } catch (err) {
+        const details = Array.isArray(err.response?.data?.details)
+          ? ` — ${err.response.data.details.join('; ')}`
+          : '';
         setError(
           '❌ Failed to dispense prescription: ' +
-            (err.response?.data?.message || err.message || 'Unknown error')
+            (err.response?.data?.message || err.message || 'Unknown error') +
+            details
         );
         console.error('Error dispensing prescription:', err);
       } finally {
@@ -199,35 +264,39 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
     }
   };
 
-  const handleCancelPrescription = async (prescriptionId) => {
-    const reason = window.prompt('Please provide a reason for cancellation:');
-    if (reason && reason.trim() !== '') {
-      try {
-        setLoading(true);
-        setError('');
-        console.log('Cancelling prescription:', prescriptionId, 'with reason:', reason);
-        
-        const response = await prescriptionService.cancelPrescription(prescriptionId, reason);
-        console.log('Cancel response:', response);
-        
-        setSuccess('✅ Prescription cancelled successfully!');
-        await refreshAfterStatusChange(response.prescription);
-        
-        // Auto-hide success message after 3 seconds
-        setTimeout(() => setSuccess(''), 3000);
-      } catch (err) {
-        console.error('Error cancelling prescription:', err);
-        setError('❌ Failed to cancel prescription: ' + (err.response?.data?.message || err.message || 'Unknown error'));
-        
-        // Auto-hide error message after 5 seconds
-        setTimeout(() => setError(''), 5000);
-      } finally {
-        setLoading(false);
-      }
-    } else if (reason !== null) {
-      // User clicked OK but didn't enter a reason
-      setError('❌ Cancellation reason is required');
-      setTimeout(() => setError(''), 3000);
+  const handleCancelPrescription = (prescriptionId) => {
+    const prescription = prescriptions.find((item) => item.id === prescriptionId);
+    setCancellationReason('');
+    setCancellingPrescription(
+      prescription || { id: prescriptionId, prescriptionNumber: '' }
+    );
+  };
+
+  const confirmCancelPrescription = async () => {
+    const reason = cancellationReason.trim();
+    if (!cancellingPrescription?.id || !reason) return;
+
+    try {
+      setCancellationBusy(true);
+      setError('');
+      const response = await prescriptionService.cancelPrescription(
+        cancellingPrescription.id,
+        reason
+      );
+      setCancellingPrescription(null);
+      setCancellationReason('');
+      setSuccess('✅ Prescription cancelled successfully!');
+      await refreshAfterStatusChange(response.prescription);
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      console.error('Error cancelling prescription:', err);
+      setError(
+        '❌ Failed to cancel prescription: ' +
+          (err.response?.data?.message || err.message || 'Unknown error')
+      );
+      setTimeout(() => setError(''), 5000);
+    } finally {
+      setCancellationBusy(false);
     }
   };
 
@@ -707,7 +776,9 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
                       'Dispense'
                     ),
                     prescription.status === 'ACTIVE' &&
-                      ['PHARMACY', 'DOCTOR', 'ADMIN'].includes(user?.role) && React.createElement(
+                      (user?.role === 'PHARMACY' ||
+                        user?.role === 'DOCTOR' ||
+                        isAdminLevelRole(user?.role)) && React.createElement(
                       'button',
                       {
                         onClick: () => handleCancelPrescription(prescription.id),
@@ -1090,6 +1161,19 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
           setSuccess('Prescription updated successfully.');
           await Promise.all([loadPrescriptions(), loadStats()]);
         },
+      }),
+
+      cancellingPrescription && React.createElement(PrescriptionCancellationModal, {
+        prescriptionNumber: cancellingPrescription.prescriptionNumber,
+        reason: cancellationReason,
+        busy: cancellationBusy,
+        onReasonChange: setCancellationReason,
+        onCancel: () => {
+          if (cancellationBusy) return;
+          setCancellingPrescription(null);
+          setCancellationReason('');
+        },
+        onConfirm: confirmCancelPrescription,
       }),
 
       // Medicine inventory audit modal
