@@ -1,10 +1,10 @@
 {
-  "version": "1.0.21",
-  "backendVersion": "1.0.21",
+  "version": "1.0.22",
+  "backendVersion": "1.0.22",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.21",
+  "latestDesktopVersion": "1.0.22",
   "releaseNotes": [
-    "Duplicate patient phone numbers; block past-time same-day appointments; fix bill save and Print Selected Only; add Sub-Admin role; updates install only on explicit restart"
+    "we have fixed the dispense and cencle prescription"
   ],
-  "publishedAt": "2026-09-16T09:32:18.153Z"
+  "publishedAt": "2026-09-16T10:13:45.732Z"
 }

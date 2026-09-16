@@ -3,6 +3,7 @@ import { PrismaClient, PrescriptionStatus, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { computeUnitsToDispenseForLine } from '../utils/prescriptionDispenseUnits';
+import { buildDispensePlan } from '../utils/prescriptionStock';
 
 const prisma = new PrismaClient();
 
@@ -787,54 +788,35 @@ export const dispensePrescription = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const lineDispense: { medicineId: string; units: number }[] = [];
-    const requiredByMedicine = new Map<string, number>();
-
-    for (const row of items) {
-      const units = computeUnitsToDispenseForLine(row);
-      lineDispense.push({ medicineId: row.medicineId, units });
-      requiredByMedicine.set(row.medicineId, (requiredByMedicine.get(row.medicineId) || 0) + units);
-    }
-
-    const medicineIds = [...requiredByMedicine.keys()];
-    const catalogRows = await prisma.medicineCatalog.findMany({
-      where: { id: { in: medicineIds } },
-      select: { id: true, name: true, stockQuantity: true, price: true },
-    });
-
-    if (catalogRows.length !== medicineIds.length) {
-      return res.status(400).json({
-        success: false,
-        message: 'One or more medicines on this prescription are missing from the catalog',
-      });
-    }
-
-    const shortages: string[] = [];
-    for (const m of catalogRows) {
-      const need = requiredByMedicine.get(m.id) || 0;
-      if (m.stockQuantity < need) {
-        shortages.push(`${m.name}: need ${need} units, in stock ${m.stockQuantity}`);
-      }
-    }
-    if (shortages.length) {
-      return res.status(400).json({
-        success: false,
-        message: 'Insufficient stock to dispense this prescription',
-        details: shortages,
-      });
-    }
-
-    const catalogById = new Map(catalogRows.map((medicine) => [medicine.id, medicine]));
-    const dispensedTotal = roundMoney(
-      lineDispense.reduce(
-        (total, line) =>
-          total + Number(catalogById.get(line.medicineId)?.price ?? 0) * line.units,
-        0,
-      ),
-    );
-
     const prescription = await prisma.$transaction(async (tx) => {
-      for (const [medicineId, need] of requiredByMedicine) {
+      // Claim the active prescription in this transaction. This prevents two
+      // rapid clicks from dispensing and decrementing the same stock twice.
+      const claimed = await tx.prescription.updateMany({
+        where: { id, status: PrescriptionStatus.ACTIVE },
+        data: { status: PrescriptionStatus.DISPENSED },
+      });
+      if (claimed.count !== 1) {
+        throw new Error('PRESCRIPTION_STATUS_CHANGED');
+      }
+
+      // Read inventory inside the dispensing transaction. No creation-time
+      // availability is retained: stock added after the prescription was made
+      // is immediately eligible for this dispense attempt.
+      const medicineIds = [...new Set(items.map((item) => item.medicineId))];
+      const currentCatalogRows = await tx.medicineCatalog.findMany({
+        where: { id: { in: medicineIds } },
+        select: { id: true, name: true, stockQuantity: true, price: true },
+      });
+      const plan = buildDispensePlan(items, currentCatalogRows);
+
+      if (plan.missingMedicineIds.length) {
+        throw new Error(`MISSING_MEDICINES:${plan.missingMedicineIds.join(',')}`);
+      }
+      if (plan.shortages.length) {
+        throw new Error(`INSUFFICIENT_STOCK:${plan.shortages.join('|')}`);
+      }
+
+      for (const [medicineId, need] of plan.requiredByMedicine) {
         const updated = await tx.medicineCatalog.updateMany({
           where: { id: medicineId, stockQuantity: { gte: need } },
           data: { stockQuantity: { decrement: need } },
@@ -844,7 +826,7 @@ export const dispensePrescription = async (req: AuthRequest, res: Response) => {
         }
       }
 
-      for (const line of lineDispense) {
+      for (const line of plan.lineDispense) {
         await tx.medicineTransaction.create({
           data: {
             prescriptionId: id,
@@ -862,7 +844,7 @@ export const dispensePrescription = async (req: AuthRequest, res: Response) => {
           isDispensed: true,
           dispensedAt: new Date(),
           dispensedBy: userId,
-          totalAmount: dispensedTotal,
+          totalAmount: plan.totalAmount,
           notes: notes || existingPrescription.prescriptionNumber + ' dispensed',
         },
         include: {
@@ -926,10 +908,33 @@ export const dispensePrescription = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error('Dispense prescription error:', error);
+    if (error?.message?.startsWith('INSUFFICIENT_STOCK:')) {
+      const details = error.message
+        .slice('INSUFFICIENT_STOCK:'.length)
+        .split('|')
+        .filter(Boolean);
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient current stock to dispense this prescription',
+        details,
+      });
+    }
+    if (error?.message?.startsWith('MISSING_MEDICINES:')) {
+      return res.status(400).json({
+        success: false,
+        message: 'One or more medicines on this prescription are missing from the catalog',
+      });
+    }
     if (error?.message === 'CONCURRENT_STOCK_MISMATCH') {
       return res.status(409).json({
         success: false,
         message: 'Stock changed while dispensing. Refresh medicine stock and try again.',
+      });
+    }
+    if (error?.message === 'PRESCRIPTION_STATUS_CHANGED') {
+      return res.status(409).json({
+        success: false,
+        message: 'Prescription status changed. Refresh the list and try again.',
       });
     }
     res.status(500).json({
@@ -1147,8 +1152,25 @@ export const getPrescriptionInventoryAudit = async (req: AuthRequest, res: Respo
       return res.status(404).json({ success: false, message: 'Prescription not found' });
     }
 
+    const auditPlan = buildDispensePlan(
+      prescription.prescriptionItems.map((item) => ({
+        medicineId: item.medicine.id,
+        quantity: item.quantity,
+        frequency: item.frequency,
+        duration: item.duration,
+      })),
+      prescription.prescriptionItems.map((item) => ({
+        id: item.medicine.id,
+        name: item.medicine.name,
+        stockQuantity: item.medicine.stockQuantity,
+        price: 0,
+      })),
+    );
+
     const items = prescription.prescriptionItems.map((item) => {
       const requiredUnits = computeUnitsToDispenseForLine(item);
+      const requiredAcrossPrescription =
+        auditPlan.requiredByMedicine.get(item.medicine.id) || requiredUnits;
       const availableUnits = item.medicine.stockQuantity;
       return {
         prescriptionItemId: item.id,
@@ -1160,9 +1182,11 @@ export const getPrescriptionInventoryAudit = async (req: AuthRequest, res: Respo
         duration: item.duration,
         quantityPerDose: item.quantity,
         requiredUnits,
+        requiredAcrossPrescription,
         availableUnits,
-        shortageUnits: Math.max(0, requiredUnits - availableUnits),
-        isAvailable: item.medicine.isActive && availableUnits >= requiredUnits,
+        shortageUnits: Math.max(0, requiredAcrossPrescription - availableUnits),
+        isAvailable:
+          item.medicine.isActive && availableUnits >= requiredAcrossPrescription,
         isActive: item.medicine.isActive,
       };
     });
@@ -1175,7 +1199,10 @@ export const getPrescriptionInventoryAudit = async (req: AuthRequest, res: Respo
           prescriptionNumber: prescription.prescriptionNumber,
           prescriptionStatus: prescription.status,
           patient: prescription.patient,
-          canDispense: items.length > 0 && items.every((item) => item.isAvailable),
+          canDispense:
+            items.length > 0 &&
+            auditPlan.shortages.length === 0 &&
+            items.every((item) => item.isAvailable),
           items,
           checkedAt: new Date().toISOString(),
         },
