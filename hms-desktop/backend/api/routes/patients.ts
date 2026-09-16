@@ -17,8 +17,9 @@ const router = Router();
 // Based on rolePermissions: ADMIN, DOCTOR, RECEPTIONIST, PHARMACY, LAB_TECH, NURSE, WARD_MANAGER, NURSING_SUPERVISOR
 const requirePatientAccess = (req: AuthRequest, res: Response, next: any) => {
   const userRole = req.user?.role;
-  const allowedRoles = [
+  const allowedRoles: UserRole[] = [
     UserRole.ADMIN,
+    UserRole.SUBADMIN,
     UserRole.DOCTOR,
     UserRole.RECEPTIONIST,
     UserRole.PHARMACY,
@@ -38,7 +39,11 @@ const requirePatientAccess = (req: AuthRequest, res: Response, next: any) => {
 /** Create patient: admin or receptionist (OPD registration). */
 const requirePatientCreateAccess = (req: AuthRequest, res: Response, next: any) => {
   const userRole = req.user?.role;
-  if (userRole === UserRole.ADMIN || userRole === UserRole.RECEPTIONIST) {
+  if (
+    userRole === UserRole.ADMIN ||
+    userRole === UserRole.SUBADMIN ||
+    userRole === UserRole.RECEPTIONIST
+  ) {
     next();
   } else {
     res.status(403).json({

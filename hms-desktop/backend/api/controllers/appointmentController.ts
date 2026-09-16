@@ -3,6 +3,7 @@ import { PrismaClient, AppointmentStatus, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { logAudit } from '../utils/auditLogger';
+import { findPastSlotError } from '../utils/appointmentTime';
 
 const prisma = new PrismaClient();
 
@@ -57,6 +58,15 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({
         success: false,
         message: 'Doctor not found or invalid role',
+      });
+    }
+
+    // Reject slots that already passed today (the same time on a later day is fine)
+    const pastSlotError = await findPastSlotError(validatedData.date, validatedData.time);
+    if (pastSlotError) {
+      return res.status(400).json({
+        success: false,
+        message: pastSlotError,
       });
     }
 
@@ -367,6 +377,20 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
       const newDate = validatedData.date ? new Date(validatedData.date) : existingAppointment.date;
       const newTime = validatedData.time || existingAppointment.time;
       const newDoctorId = validatedData.doctorId || existingAppointment.doctorId;
+
+      // Re-scheduling into a slot that already passed today is not allowed
+      if (validatedData.date || validatedData.time) {
+        const pastSlotError = await findPastSlotError(
+          validatedData.date || newDate,
+          newTime
+        );
+        if (pastSlotError) {
+          return res.status(400).json({
+            success: false,
+            message: pastSlotError,
+          });
+        }
+      }
 
       // Normalize date to start of day for accurate comparison
       const appointmentDate = new Date(newDate);

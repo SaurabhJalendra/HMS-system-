@@ -126,14 +126,32 @@ export const authenticateToken = async (
   }
 };
 
+/**
+ * SUBADMIN is a deputy administrator. It inherits every ADMIN grant, so any
+ * route that allows ADMIN also allows SUBADMIN without listing it.
+ *
+ * The two things it must never reach are guarded separately:
+ * hospital configuration (`requireAdminOnly`) and administrator accounts
+ * (`assertCanManageTargetUser` in the user controller).
+ */
+export const ADMIN_LEVEL_ROLES: UserRole[] = [UserRole.ADMIN, UserRole.SUBADMIN];
+
+export const isAdminLevel = (userRole: UserRole): boolean =>
+  ADMIN_LEVEL_ROLES.includes(userRole);
+
 // Export requireRole as a function declaration (better for CommonJS compatibility)
 export function requireRole(...roles: UserRole[]) {
+  const allowed =
+    roles.includes(UserRole.ADMIN) && !roles.includes(UserRole.SUBADMIN)
+      ? [...roles, UserRole.SUBADMIN]
+      : roles;
+
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return next(createError('Authentication required', 401));
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!allowed.includes(req.user.role)) {
       return next(createError('Insufficient permissions', 403));
     }
 
@@ -141,6 +159,24 @@ export function requireRole(...roles: UserRole[]) {
   };
 }
 
+/** Strictly ADMIN. Use for hospital configuration and administrator accounts. */
+export const requireAdminOnly = (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.user) {
+    return next(createError('Authentication required', 401));
+  }
+  if (req.user.role !== UserRole.ADMIN) {
+    return next(
+      createError('Only an administrator can perform this action', 403)
+    );
+  }
+  next();
+};
+
+/** Allows ADMIN and SUBADMIN. */
 export const requireAdmin = requireRole(UserRole.ADMIN);
 export const requireDoctor = requireRole(UserRole.DOCTOR);
 export const requireLabTech = requireRole(UserRole.LAB_TECH);
@@ -167,6 +203,7 @@ export const requireClinicalStaff = requireRole(
 export const canAccessPatientData = (userRole: UserRole): boolean => {
   return [
     UserRole.ADMIN,
+    UserRole.SUBADMIN,
     UserRole.DOCTOR,
     UserRole.LAB_TECH,
     UserRole.PHARMACY,
@@ -178,14 +215,19 @@ export const canAccessPatientData = (userRole: UserRole): boolean => {
 };
 
 export const canAccessFinancialData = (userRole: UserRole): boolean => {
-  const allowed: UserRole[] = [UserRole.ADMIN, UserRole.RECEPTIONIST];
+  const allowed: UserRole[] = [
+    UserRole.ADMIN,
+    UserRole.SUBADMIN,
+    UserRole.RECEPTIONIST,
+  ];
   return allowed.includes(userRole);
 };
 
 export const canManageUsers = (userRole: UserRole): boolean => {
-  return userRole === UserRole.ADMIN;
+  return isAdminLevel(userRole);
 };
 
+/** Hospital configuration stays with the administrator only. */
 export const canManageSystem = (userRole: UserRole): boolean => {
   return userRole === UserRole.ADMIN;
 };
@@ -193,6 +235,7 @@ export const canManageSystem = (userRole: UserRole): boolean => {
 export const canManageIPD = (userRole: UserRole): boolean => {
   const allowed: UserRole[] = [
     UserRole.ADMIN,
+    UserRole.SUBADMIN,
     UserRole.DOCTOR,
     UserRole.NURSE,
     UserRole.WARD_MANAGER,
@@ -204,6 +247,7 @@ export const canManageIPD = (userRole: UserRole): boolean => {
 export const canManageOT = (userRole: UserRole): boolean => {
   const allowed: UserRole[] = [
     UserRole.ADMIN,
+    UserRole.SUBADMIN,
     UserRole.DOCTOR,
     UserRole.RECEPTIONIST,
     UserRole.NURSE,

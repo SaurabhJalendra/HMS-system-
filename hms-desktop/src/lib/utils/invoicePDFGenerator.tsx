@@ -140,7 +140,12 @@ const InvoicePDFGenerator = {
   // Generate OPD Bill/Invoice PDF
   generateOPDBillPDF: (invoiceData) => {
     const printWindow = window.open('', '_blank');
-    
+    if (!printWindow) {
+      throw new Error(
+        'The invoice window could not be opened. Allow pop-ups for ZenHosp, then print again.'
+      );
+    }
+
     const hospitalConfig = invoiceData.hospitalConfig || {};
     // CRITICAL: Use displayCurrency if available, otherwise currency, never default to USD
     const currency = hospitalConfig.displayCurrency || hospitalConfig.currency;

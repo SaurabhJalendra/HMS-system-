@@ -5,6 +5,7 @@ import {
   getRoleQuickActions,
   getRoleDashboardWidgets,
   hasModuleAccess,
+  isAdminLevelRole,
   shouldShowAvailableModules,
 } from '../../lib/utils/rolePermissions';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -51,7 +52,7 @@ const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashb
       setLoading(true);
       setError('');
 
-      if (userRole === UserRole.ADMIN) {
+      if (isAdminLevelRole(userRole)) {
         const [userStatsResult, patientStatsResult, appointmentStatsResult, usersListResult, patientsListResult] = await Promise.allSettled([
           userService.getUserStats(),
           patientService.getPatientStats(),

@@ -19,6 +19,18 @@ const TIME_SLOTS = [
   '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00',
 ];
 
+/** Minutes past midnight for an "HH:MM" slot. */
+const slotToMinutes = (slot: string): number => {
+  const [hours, minutes] = slot.split(':').map((part) => parseInt(part, 10));
+  return hours * 60 + minutes;
+};
+
+/** Minutes past midnight on the local clock, which is the clinic's clock. */
+const minutesNow = (): number => {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+};
+
 const AppointmentSlotPicker: React.FC<AppointmentSlotPickerProps> = ({
   patientId,
   onSelect,
@@ -52,8 +64,24 @@ const AppointmentSlotPicker: React.FC<AppointmentSlotPickerProps> = ({
   }, [initialDoctorId, initialDate, initialTime]);
 
   const today = toLocalYmd();
+  // Read on every render so an open form never works from a stale clock
+  const nowMinutes = minutesNow();
+
+  /** A slot has passed only when it falls on today. Later days stay fully open. */
+  const isPastSlot = (slot: string): boolean =>
+    !!date && date === today && slotToMinutes(slot) < nowMinutes;
+
+  // Switching the date to today can invalidate an already-picked time
+  useEffect(() => {
+    if (date && date === toLocalYmd() && time && slotToMinutes(time) < minutesNow()) {
+      setTime('');
+    }
+  }, [date, time]);
+
+  const allSlotsPassedToday = date === today && TIME_SLOTS.every(isPastSlot);
   const patientMissing = requirePatient && !patientId;
-  const canSubmit = !patientMissing && !!selectedDoctorId && !!date && !!time;
+  const canSubmit =
+    !patientMissing && !!selectedDoctorId && !!date && !!time && !isPastSlot(time);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,10 +148,20 @@ const AppointmentSlotPicker: React.FC<AppointmentSlotPickerProps> = ({
           }}
         >
           <option value="">Select time</option>
-          {TIME_SLOTS.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
+          {TIME_SLOTS.map((t) => {
+            const passed = isPastSlot(t);
+            return (
+              <option key={t} value={t} disabled={passed}>
+                {passed ? `${t} — already passed` : t}
+              </option>
+            );
+          })}
         </select>
+        {allSlotsPassedToday && (
+          <p style={{ marginTop: 4, color: '#B45309', fontSize: 13 }}>
+            All of today&apos;s slots have passed. Choose a later date.
+          </p>
+        )}
       </div>
       <button
         type="submit"

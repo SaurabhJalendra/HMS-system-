@@ -3,7 +3,7 @@ import { config } from '../config/environment';
 import { persistApiUrl, resolveStartupApiUrl } from '../lib/api/runtimeApiUrl';
 import authService from '../lib/api/services/authService';
 import configService from '../lib/api/services/configService';
-import { hasModuleAccess } from '../lib/utils/rolePermissions';
+import { hasModuleAccess, isAdminLevelRole } from '../lib/utils/rolePermissions';
 import { UpdateSessionProvider } from '../lib/contexts/UpdateSessionContext';
 import VersionCompatibilityBanner from './config/VersionCompatibilityBanner';
 import { DesktopUpdateAutoInstaller } from './config/AppUpdatePanel';
@@ -309,7 +309,8 @@ const App: React.FC = () => {
   const handleNavigation = (module: ModuleName, action: any = null): void => {
     const allowConfig = module === 'configuration';
     if (user && (allowConfig || hasModuleAccess(user.role, module))) {
-      const receptionistLike = user.role === 'RECEPTIONIST' || user.role === 'ADMIN';
+      const receptionistLike =
+        user.role === 'RECEPTIONIST' || isAdminLevelRole(user.role);
       if (module === 'appointments' && receptionistLike) {
         setCurrentModule('opdFlow');
         setCurrentAction(action || 'bookAppointment');

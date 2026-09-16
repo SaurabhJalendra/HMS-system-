@@ -99,6 +99,22 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
     };
   });
 
+  const isAdmin = currentUser?.role === UserRole.ADMIN;
+
+  /**
+   * Only an administrator hands out administrator-level roles. A sub-admin sees
+   * staff roles only, which matches what the backend will accept.
+   */
+  const assignableRoles = isAdmin
+    ? roles
+    : roles.filter(
+        role => role.value !== UserRole.ADMIN && role.value !== UserRole.SUBADMIN
+      );
+
+  /** Sub-admins may not edit, delete, reset or deactivate administrator accounts. */
+  const canManageTargetUser = (targetRole) =>
+    isAdmin || (targetRole !== UserRole.ADMIN && targetRole !== UserRole.SUBADMIN);
+
   useEffect(() => {
     loadInitialData();
   }, []);
@@ -365,26 +381,34 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
     return currentUser && canManageUsers(currentUser.role);
   };
 
+  const roleOfListedUser = (targetUserId) =>
+    users.find((listed) => listed.id === targetUserId)?.role;
+
   const canDeleteUser = (targetUserId) => {
     // Only admins can delete users, and they cannot delete themselves
     return currentUser && 
            canManageUsers(currentUser.role) && 
-           currentUser.id !== targetUserId;
+           currentUser.id !== targetUserId &&
+           canManageTargetUser(roleOfListedUser(targetUserId));
   };
 
   const canToggleUserStatus = (targetUserId) => {
     // Admins can toggle any user's status, users can only deactivate themselves
-    return currentUser && (
-      canManageUsers(currentUser.role) || 
-      currentUser.id === targetUserId
+    if (!currentUser) return false;
+    if (currentUser.id === targetUserId) return true;
+    return (
+      canManageUsers(currentUser.role) &&
+      canManageTargetUser(roleOfListedUser(targetUserId))
     );
   };
 
   const canResetPassword = (targetUserId) => {
     // Admins can reset any password, users can only reset their own
-    return currentUser && (
-      canManageUsers(currentUser.role) || 
-      currentUser.id === targetUserId
+    if (!currentUser) return false;
+    if (currentUser.id === targetUserId) return true;
+    return (
+      canManageUsers(currentUser.role) &&
+      canManageTargetUser(roleOfListedUser(targetUserId))
     );
   };
 
@@ -623,7 +647,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                   backgroundColor: '#FFFFFF'
                 }
               },
-              roles.map(role => React.createElement(
+              assignableRoles.map(role => React.createElement(
                 'option',
                 { key: role.value, value: role.value },
                 `${role.icon} ${role.label}`
@@ -901,7 +925,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                   React.createElement(
                     'div',
                     { style: { display: 'flex', gap: '8px' } },
-                    canManageUsers(currentUser?.role) && React.createElement(
+                    canManageUsers(currentUser?.role) && canManageTargetUser(user.role) && React.createElement(
                       'button',
                       {
                         onClick: () => handleStartEdit(user),
@@ -1019,7 +1043,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
                 onChange: handleEditInputChange,
                 className: 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
               },
-              roles.map(role => React.createElement(
+              assignableRoles.map(role => React.createElement(
                 'option',
                 { key: role.value, value: role.value },
                 `${role.icon} ${role.label}`

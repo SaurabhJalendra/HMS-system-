@@ -294,7 +294,7 @@ async function downloadGithubInstaller(): Promise<{
         version,
         method: "github-installer",
         releaseNotes: [
-          "Download complete. ZenHosp will close, install the update, and reopen. The project Setup.exe was updated too.",
+          "Download complete. Click Restart and install in App updates when you are ready. The project Setup.exe was updated too.",
         ],
       },
     });
@@ -311,7 +311,9 @@ function bindAutoUpdaterListenersOnce() {
   listenersBound = true;
 
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Never install behind the user's back — not even on quit. Installation only
+  // happens through the explicit "Restart and install" action.
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.logger = console;
 
   autoUpdater.on("checking-for-update", () => {

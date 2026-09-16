@@ -14,7 +14,7 @@ import { getInfoContent } from '../../lib/infoContent';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { calculateAge } from '../../lib/utils/ageCalculator';
 import { UserRole } from '../../lib/api/types';
-import { canEditPrescription } from '../../lib/utils/rolePermissions';
+import { canEditPrescription, isAdminLevelRole } from '../../lib/utils/rolePermissions';
 import PrescriptionEditModal from './PrescriptionEditModal';
 
 const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
@@ -689,7 +689,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
                       },
                       'Edit'
                     ),
-                    (user?.role === 'PHARMACY' || user?.role === 'ADMIN') && React.createElement(
+                    (user?.role === 'PHARMACY' || isAdminLevelRole(user?.role)) && React.createElement(
                       'button',
                       {
                         onClick: () => handleViewAuditLogs(prescription.id),
@@ -698,7 +698,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
                       'Audit'
                     ),
                     prescription.status === 'ACTIVE' &&
-                      (user?.role === 'PHARMACY' || user?.role === 'ADMIN') && React.createElement(
+                      (user?.role === 'PHARMACY' || isAdminLevelRole(user?.role)) && React.createElement(
                       'button',
                       {
                         onClick: () => handleDispensePrescription(prescription.id),
@@ -715,7 +715,7 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
                       },
                       'Cancel'
                     ),
-                    user?.role === 'ADMIN' && React.createElement(
+                    isAdminLevelRole(user?.role) && React.createElement(
                       'button',
                       {
                         onClick: () => handleDeletePrescription(prescription.id),
