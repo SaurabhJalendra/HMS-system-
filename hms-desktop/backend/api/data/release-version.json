@@ -1,10 +1,10 @@
 {
-  "version": "1.0.22",
-  "backendVersion": "1.0.22",
+  "version": "1.0.23",
+  "backendVersion": "1.0.23",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.22",
+  "latestDesktopVersion": "1.0.23",
   "releaseNotes": [
-    "we have fixed the dispense and cencle prescription"
+    "Fix OPD receptionist, doctor, consultation, lab, and prescription workflows"
   ],
-  "publishedAt": "2026-09-16T10:13:45.732Z"
+  "publishedAt": "2026-09-18T05:37:11.865Z"
 }

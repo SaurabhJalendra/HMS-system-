@@ -28,16 +28,29 @@ const TodaysQueue: React.FC<TodaysQueueProps> = ({
 }) => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [retryKey, setRetryKey] = useState(0);
   const resolvedDate = queueDate || toLocalYmd();
   const resolvedDoctorId = doctorId || currentUserId;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError('');
     appointmentService
       .getAppointments({ doctorId: resolvedDoctorId, date: resolvedDate, limit: 100 })
       .then((data) => {
         if (!cancelled) setAppointments(data?.appointments || []);
+      })
+      .catch((requestError: unknown) => {
+        if (cancelled) return;
+        const detail =
+          (requestError as { response?: { data?: { message?: string } }; message?: string })
+            ?.response?.data?.message ||
+          (requestError as { message?: string })?.message ||
+          'Failed to load the doctor queue.';
+        setAppointments([]);
+        setError(detail);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -45,13 +58,15 @@ const TodaysQueue: React.FC<TodaysQueueProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [resolvedDoctorId, resolvedDate, refreshKey]);
+  }, [resolvedDoctorId, resolvedDate, refreshKey, retryKey]);
 
   const byStatus = (a: Appointment, b: Appointment) => {
     const order = ['IN_PROGRESS', 'SCHEDULED', 'CONFIRMED', 'COMPLETED', 'NO_SHOW', 'CANCELLED'];
     return order.indexOf(a.status) - order.indexOf(b.status);
   };
-  const sorted = [...appointments].sort(byStatus);
+  const sorted = appointments
+    .filter((appointment) => !['CANCELLED', 'NO_SHOW'].includes(appointment.status))
+    .sort(byStatus);
 
   if (loading) return <LoadingSpinner />;
 
@@ -60,15 +75,33 @@ const TodaysQueue: React.FC<TodaysQueueProps> = ({
       <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>
         Queue for {resolvedDate === toLocalYmd() ? 'today' : resolvedDate}
       </h3>
-      {sorted.length === 0 ? (
+      {error ? (
+        <div style={{ padding: 12, border: '1px solid #FCA5A5', borderRadius: 8, backgroundColor: '#FEF2F2' }}>
+          <p role="alert" style={{ margin: '0 0 8px', color: '#B91C1C', fontSize: 14 }}>{error}</p>
+          <button type="button" onClick={() => setRetryKey((key) => key + 1)} style={{ padding: '6px 10px', cursor: 'pointer' }}>
+            Retry
+          </button>
+        </div>
+      ) : sorted.length === 0 ? (
         <p style={{ color: '#6B7280', fontSize: 14 }}>No appointments for {resolvedDate === toLocalYmd() ? 'today' : resolvedDate}.</p>
       ) : (
         sorted.map((apt) => {
           const kind = getOpdQueueRowKind(apt);
-          const label = getOpdQueueRowLabel(kind);
+          const canOpen = resolvedDate === toLocalYmd() || kind !== 'start';
+          const heldUntil = apt.consultations?.[0]?.heldUntil;
+          const holdElapsed =
+            Boolean(heldUntil) && new Date(heldUntil as string).getTime() <= Date.now();
+          const label = canOpen
+            ? getOpdQueueRowLabel(kind)
+            : resolvedDate > toLocalYmd()
+              ? 'Scheduled for a future date'
+              : 'Past visit — reschedule first';
+          const effectiveLabel =
+            canOpen && kind === 'held' && holdElapsed
+              ? 'Resume consultation (hold elapsed) →'
+              : label;
           const isDone = kind === 'completed';
           const isHeld = kind === 'held';
-          const heldUntil = apt.consultations?.[0]?.heldUntil;
           return (
             <div
               key={apt.id}
@@ -89,12 +122,23 @@ const TodaysQueue: React.FC<TodaysQueueProps> = ({
                       : isHeld
                         ? '#FFFBEB'
                         : '#FFF',
-                cursor: 'pointer',
+                cursor: canOpen ? 'pointer' : 'not-allowed',
+                opacity: canOpen ? 1 : 0.7,
               }}
-              onClick={() => onSelectAppointment(apt, kind)}
-              onKeyDown={(e) => e.key === 'Enter' && onSelectAppointment(apt, kind)}
-              role="button"
-              tabIndex={0}
+              onClick={canOpen ? () => onSelectAppointment(apt, kind) : undefined}
+              onKeyDown={
+                canOpen
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelectAppointment(apt, kind);
+                      }
+                    }
+                  : undefined
+              }
+              role={canOpen ? 'button' : undefined}
+              tabIndex={canOpen ? 0 : -1}
+              aria-disabled={!canOpen}
             >
               <div>
                 <span style={{ fontWeight: 600 }}>{(apt as any).patient?.name ?? 'Patient'}</span>
@@ -114,7 +158,7 @@ const TodaysQueue: React.FC<TodaysQueueProps> = ({
                   fontWeight: isDone || isHeld ? 600 : 400,
                 }}
               >
-                {label}
+                {effectiveLabel}
               </span>
             </div>
           );

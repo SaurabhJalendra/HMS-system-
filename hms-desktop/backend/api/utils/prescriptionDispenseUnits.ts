@@ -3,18 +3,17 @@
  * when dispensing — used by dispense flow and inventory reconciliation.
  */
 
-export function dosesPerDayFromFrequency(frequency: string): number {
+export function parseDosesPerDayFromFrequency(frequency: string): number | null {
   const raw = (frequency || '').trim();
-  if (!raw) return 1;
+  if (!raw) return null;
 
   const compact = raw.replace(/\s/g, '');
   if (/^\d+(-\d+)+$/.test(compact)) {
-    let sum = 0;
-    for (const p of compact.split('-')) {
-      const n = parseInt(p, 10);
-      if (!Number.isNaN(n)) sum += n;
-    }
-    return Math.max(1, sum);
+    const sum = compact
+      .split('-')
+      .map(Number)
+      .reduce((total, doses) => total + doses, 0);
+    return sum > 0 && sum <= 24 ? sum : null;
   }
 
   const upper = compact.toUpperCase();
@@ -30,13 +29,48 @@ export function dosesPerDayFromFrequency(frequency: string): number {
   };
   if (abbrev[upper] !== undefined) return abbrev[upper];
 
-  const nums = raw.match(/\d+/g);
-  if (nums?.length) {
-    const n = parseInt(nums[0], 10);
-    if (!Number.isNaN(n) && n > 0) return Math.min(n, 24);
+  const words = raw.toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
+  const wordAliases: Record<string, number> = {
+    daily: 1,
+    'once daily': 1,
+    'once a day': 1,
+    'twice daily': 2,
+    'twice a day': 2,
+    'thrice daily': 3,
+    'three times daily': 3,
+    'three times a day': 3,
+    'four times daily': 4,
+    'four times a day': 4,
+  };
+  if (wordAliases[words]) return wordAliases[words];
+
+  const timesPerDay = words.match(/^(\d{1,2})\s*(?:times?|x)\s*(?:a|per)?\s*day$/);
+  if (timesPerDay) {
+    const doses = Number(timesPerDay[1]);
+    return doses > 0 && doses <= 24 ? doses : null;
   }
 
-  return 1;
+  const everyHours = words.match(/^every\s+(\d{1,2})\s*(?:hours?|hrs?)$/);
+  if (everyHours) {
+    const interval = Number(everyHours[1]);
+    return interval > 0 && interval <= 24 && 24 % interval === 0
+      ? 24 / interval
+      : null;
+  }
+
+  return null;
+}
+
+export function isSupportedPrescriptionFrequency(frequency: string): boolean {
+  return parseDosesPerDayFromFrequency(frequency) !== null;
+}
+
+export function dosesPerDayFromFrequency(frequency: string): number {
+  const doses = parseDosesPerDayFromFrequency(frequency);
+  if (doses === null) {
+    throw new RangeError(`Unsupported prescription frequency: ${frequency}`);
+  }
+  return doses;
 }
 
 export function computeUnitsToDispenseForLine(item: {

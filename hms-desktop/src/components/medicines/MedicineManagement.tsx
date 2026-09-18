@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
 import medicineService from '../../lib/api/services/medicineService';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
@@ -8,7 +9,7 @@ import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { formatCurrencySync } from '../../lib/utils/currencyAndTimezone';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
 
-const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
+const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) => {
   const { formatCurrency, config, displayCurrency, baseCurrency, refreshConfig } = useHospitalConfig();
   const directlyFetchedCurrencyRef = useRef(null);
   const [currentDisplayCurrency, setCurrentDisplayCurrency] = useState(null);
@@ -169,10 +170,13 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
   const [inventorySyncBanner, setInventorySyncBanner] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(searchTerm, 350);
   const [filterCategory, setFilterCategory] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [activeTab, setActiveTab] = useState('list');
+  const [activeTab, setActiveTab] = useState(initialAction === 'stockAlert' ? 'inventory' : 'list');
+  const medicineListRequestRef = useRef(0);
   
   // Inventory Management State
   const [stats, setStats] = useState(null);
@@ -216,6 +220,16 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
   });
 
   useEffect(() => {
+    setAppliedSearch(debouncedSearch);
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    if (initialAction === 'stockAlert') {
+      setActiveTab('inventory');
+    }
+  }, [initialAction]);
+
+  useEffect(() => {
     // Only load medicines if user is authenticated
     if (isAuthenticated && user) {
       loadMedicines();
@@ -225,7 +239,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
     } else {
       console.warn('[MedicineManagement] User not authenticated, skipping medicine load');
     }
-  }, [currentPage, searchTerm, filterCategory, activeTab, isAuthenticated, user]);
+  }, [currentPage, appliedSearch, filterCategory, activeTab, isAuthenticated, user]);
 
   useEffect(() => {
     if (activeTab === 'inventory' && transactionsPage) {
@@ -244,19 +258,26 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
       return;
     }
     
+    const requestId = ++medicineListRequestRef.current;
     setLoading(true);
     setError(''); // Clear previous errors
     try {
       const response = await medicineService.getMedicines({
         page: currentPage,
-        search: searchTerm,
+        search: appliedSearch,
         category: filterCategory
       });
-      if (response.success) {
+      if (requestId === medicineListRequestRef.current && response.success) {
+        const nextTotalPages = Math.max(1, response.data.pagination.totalPages || 1);
+        if (currentPage > nextTotalPages) {
+          setCurrentPage(nextTotalPages);
+          return;
+        }
         setMedicines(response.data.medicines);
-        setTotalPages(response.data.pagination.totalPages);
+        setTotalPages(nextTotalPages);
       }
     } catch (err: any) {
+      if (requestId !== medicineListRequestRef.current) return;
       // Check for network/connection errors
       if (err.code === 'ERR_NETWORK' || err.message === 'Network Error' || !err.response) {
         setError('Cannot connect to backend server. Please ensure the backend server is running.');
@@ -265,7 +286,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
       }
       console.error('Error loading medicines:', err);
     } finally {
-      setLoading(false);
+      if (requestId === medicineListRequestRef.current) setLoading(false);
     }
   };
 
@@ -509,6 +530,9 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
         setEditingMedicine(null);
         setEditFormData({});
         await loadMedicines();
+        if (activeTab === 'inventory') {
+          await loadInventoryData();
+        }
         setError('');
       } else {
         const zodDetail =
@@ -546,6 +570,9 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
         setShowDeleteConfirm(false);
         setMedicineToDelete(null);
         await loadMedicines();
+        if (activeTab === 'inventory') {
+          await loadInventoryData();
+        }
         setError('');
       } else {
         setError(response.message || 'Failed to delete medicine');
@@ -684,10 +711,19 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
         React.createElement(
           'input',
           {
-            type: 'text',
+            type: 'search',
             placeholder: 'Search medicines...',
             value: searchTerm,
-            onChange: (e) => setSearchTerm(e.target.value),
+            onChange: (e) => {
+              setCurrentPage(1);
+              setSearchTerm(e.target.value);
+            },
+            onKeyDown: (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                setAppliedSearch(searchTerm);
+              }
+            },
             style: { padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }
           }
         ),
@@ -695,7 +731,10 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
           'select',
           {
             value: filterCategory,
-            onChange: (e) => setFilterCategory(e.target.value),
+            onChange: (e) => {
+              setCurrentPage(1);
+              setFilterCategory(e.target.value);
+            },
             style: { padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }
           },
           React.createElement('option', { value: '' }, 'All Categories'),
@@ -707,7 +746,13 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
         React.createElement(
           'button',
           {
-            onClick: loadMedicines,
+            onClick: () => {
+              if (appliedSearch === searchTerm) {
+                loadMedicines();
+              } else {
+                setAppliedSearch(searchTerm);
+              }
+            },
             style: {
               backgroundColor: '#6C757D',
               color: '#FFFFFF',
@@ -819,6 +864,35 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
               })
             )
           )
+        )
+      ),
+      totalPages > 1 && React.createElement(
+        'div',
+        { className: 'mt-4 flex items-center justify-between border-t border-gray-200 pt-4' },
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => setCurrentPage((page) => Math.max(1, page - 1)),
+            disabled: currentPage === 1,
+            className: 'px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+          },
+          'Previous'
+        ),
+        React.createElement(
+          'span',
+          { className: 'text-sm text-gray-700' },
+          `Page ${currentPage} of ${totalPages}`
+        ),
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => setCurrentPage((page) => Math.min(totalPages, page + 1)),
+            disabled: currentPage >= totalPages,
+            className: 'px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+          },
+          'Next'
         )
       )
     ),
@@ -1156,12 +1230,24 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
                   'td',
                   { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium' },
                   React.createElement(
-                    'button',
-                    {
-                      onClick: () => handleOpenStockUpdate(medicine),
-                      className: 'text-blue-600 hover:text-blue-900'
-                    },
-                    'Update Stock'
+                    'div',
+                    { className: 'flex space-x-3' },
+                    React.createElement(
+                      'button',
+                      {
+                        onClick: () => handleEdit(medicine),
+                        className: 'text-teal-600 hover:text-teal-900'
+                      },
+                      'Edit'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        onClick: () => handleOpenStockUpdate(medicine),
+                        className: 'text-blue-600 hover:text-blue-900'
+                      },
+                      'Update Stock'
+                    )
                   )
                 )
               ))
@@ -1170,6 +1256,161 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
             'div',
             { className: 'px-6 py-8 text-center text-gray-500' },
             '✅ No low stock items. All medicines are well stocked!'
+          )
+        )
+      ),
+
+      React.createElement(
+        'div',
+        { className: 'bg-white rounded-lg shadow order-4' },
+        React.createElement(
+          'div',
+          { className: 'px-6 py-4 border-b border-gray-200' },
+          React.createElement('h3', { className: 'text-lg font-medium text-gray-900' }, 'All medicines — edit and update stock'),
+          React.createElement(
+            'p',
+            { className: 'mt-1 text-sm text-gray-500' },
+            'Includes medicines that are not on the low-stock alert list.'
+          )
+        ),
+        React.createElement(
+          'div',
+          { className: 'px-6 py-4 border-b border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-3' },
+          React.createElement('input', {
+            type: 'search',
+            placeholder: 'Search medicines...',
+            value: searchTerm,
+            onChange: (e) => {
+              setCurrentPage(1);
+              setSearchTerm(e.target.value);
+            },
+            onKeyDown: (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                setAppliedSearch(searchTerm);
+              }
+            },
+            className: 'px-3 py-2 border border-gray-300 rounded-lg text-sm'
+          }),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              onClick: () => {
+                if (appliedSearch === searchTerm) {
+                  loadMedicines();
+                } else {
+                  setAppliedSearch(searchTerm);
+                }
+              },
+              className: 'px-4 py-2 bg-gray-600 text-white rounded-lg text-sm hover:bg-gray-700'
+            },
+            'Search'
+          )
+        ),
+        React.createElement(
+          'div',
+          { className: 'overflow-x-auto' },
+          medicines.length > 0 ? React.createElement(
+            'table',
+            { className: 'min-w-full divide-y divide-gray-200' },
+            React.createElement(
+              'thead',
+              { className: 'bg-gray-50' },
+              React.createElement(
+                'tr',
+                null,
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Medicine'),
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Category'),
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Current Stock'),
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Threshold'),
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Status'),
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Actions')
+              )
+            ),
+            React.createElement(
+              'tbody',
+              { className: 'bg-white divide-y divide-gray-200' },
+              medicines.map((medicine) => {
+                const stockQuantity = medicine.stockQuantity ?? medicine.quantity ?? 0;
+                const lowStockThreshold = medicine.lowStockThreshold ?? 10;
+                const isLow = stockQuantity <= lowStockThreshold;
+                return React.createElement(
+                  'tr',
+                  { key: medicine.id, className: 'hover:bg-gray-50' },
+                  React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900' }, medicine.name),
+                  React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, medicine.category || '-'),
+                  React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-900' }, stockQuantity),
+                  React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, lowStockThreshold),
+                  React.createElement(
+                    'td',
+                    { className: 'px-6 py-4 whitespace-nowrap text-sm' },
+                    React.createElement(
+                      'span',
+                      { className: `px-2 py-1 text-xs font-medium rounded-full ${isLow ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}` },
+                      isLow ? 'LOW' : 'OK'
+                    )
+                  ),
+                  React.createElement(
+                    'td',
+                    { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium' },
+                    React.createElement(
+                      'div',
+                      { className: 'flex space-x-3' },
+                      React.createElement(
+                        'button',
+                        {
+                          onClick: () => handleEdit(medicine),
+                          className: 'text-teal-600 hover:text-teal-900'
+                        },
+                        'Edit'
+                      ),
+                      React.createElement(
+                        'button',
+                        {
+                          onClick: () => handleOpenStockUpdate(medicine),
+                          className: 'text-blue-600 hover:text-blue-900'
+                        },
+                        'Update Stock'
+                      )
+                    )
+                  )
+                );
+              })
+            )
+          ) : React.createElement(
+            'div',
+            { className: 'px-6 py-8 text-center text-gray-500' },
+            loading ? 'Loading medicines...' : 'No medicines found'
+          )
+        ),
+        totalPages > 1 && React.createElement(
+          'div',
+          { className: 'px-6 py-4 border-t border-gray-200 flex items-center justify-between' },
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              onClick: () => setCurrentPage((p) => Math.max(1, p - 1)),
+              disabled: currentPage === 1,
+              className: 'px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+            },
+            'Previous'
+          ),
+          React.createElement(
+            'span',
+            { className: 'text-sm text-gray-700' },
+            `Page ${currentPage} of ${totalPages}`
+          ),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              onClick: () => setCurrentPage((p) => p + 1),
+              disabled: currentPage >= totalPages,
+              className: 'px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+            },
+            'Next'
           )
         )
       ),
@@ -1277,7 +1518,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack }) => {
       // Transaction History
       React.createElement(
         'div',
-        { className: 'bg-white rounded-lg shadow order-4' },
+        { className: 'bg-white rounded-lg shadow order-5' },
         React.createElement(
           'div',
           { className: 'px-6 py-4 border-b border-gray-200' },

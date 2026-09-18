@@ -7,6 +7,10 @@ import { resolveConsultationFee } from '../utils/hospitalHelper';
 
 const prisma = new PrismaClient();
 
+const bloodPressureSchema = z.string()
+  .trim()
+  .regex(/^\d{2,3}\/\d{2,3}$/, 'Blood pressure must use systolic/diastolic format, for example 120/80');
+
 // Validation schemas
 const consultationCreateSchema = z.object({
   appointmentId: z.string().min(1, 'Appointment ID is required'),
@@ -14,6 +18,9 @@ const consultationCreateSchema = z.object({
   doctorId: z.string().min(1, 'Doctor ID is required'),
   diagnosis: z.string().min(1, 'Diagnosis is required').max(1000, 'Diagnosis too long'),
   notes: z.string().max(2000, 'Notes too long').optional(),
+  temperature: z.number().min(30).max(45).optional(),
+  bloodPressure: bloodPressureSchema.optional(),
+  followUpDate: z.string().optional(),
   /** ISO 8601 datetime — when set, visit stays on hold (e.g. awaiting lab); appointment stays IN_PROGRESS. */
   heldUntil: z.string().optional(),
 });
@@ -21,7 +28,10 @@ const consultationCreateSchema = z.object({
 const consultationUpdateSchema = z.object({
   diagnosis: z.string().min(1, 'Diagnosis is required').max(1000, 'Diagnosis too long').optional(),
   notes: z.string().max(2000, 'Notes too long').optional(),
-  /** Pass null to clear hold and allow completing the visit (appointment → COMPLETED). */
+  temperature: z.union([z.number().min(30).max(45), z.null()]).optional(),
+  bloodPressure: z.union([bloodPressureSchema, z.null()]).optional(),
+  followUpDate: z.union([z.string(), z.null()]).optional(),
+  /** Pass null to clear hold and continue the visit to prescription. */
   heldUntil: z.union([z.string(), z.null()]).optional(),
 });
 
@@ -38,6 +48,7 @@ const consultationSearchSchema = z.object({
 export const createConsultation = async (req: AuthRequest, res: Response) => {
   try {
     const validatedData = consultationCreateSchema.parse(req.body);
+    const actor = req.user!;
 
     // Verify appointment exists
     const appointment = await prisma.appointment.findUnique({
@@ -70,6 +81,16 @@ export const createConsultation = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (
+      actor.role === UserRole.DOCTOR &&
+      (appointment.doctorId !== actor.id || validatedData.doctorId !== actor.id)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Doctors can only create consultations for their own appointments',
+      });
+    }
+
     // Appointment must be with a clinician user (DOCTOR or ADMIN who also sees patients)
     if (
       appointment.doctor.role !== UserRole.DOCTOR &&
@@ -96,7 +117,11 @@ export const createConsultation = async (req: AuthRequest, res: Response) => {
 
     const fee = await resolveConsultationFee(appointment.doctor?.consultationFee);
 
-    const { heldUntil: heldUntilRaw, ...consultationRest } = validatedData;
+    const {
+      heldUntil: heldUntilRaw,
+      followUpDate: followUpDateRaw,
+      ...consultationRest
+    } = validatedData;
     let heldUntil: Date | null = null;
     if (heldUntilRaw) {
       heldUntil = new Date(heldUntilRaw);
@@ -106,6 +131,19 @@ export const createConsultation = async (req: AuthRequest, res: Response) => {
           message: 'Invalid heldUntil datetime',
         });
       }
+      if (heldUntil.getTime() <= Date.now()) {
+        return res.status(400).json({
+          success: false,
+          message: 'heldUntil must be a future date and time',
+        });
+      }
+    }
+    const followUpDate = followUpDateRaw ? new Date(followUpDateRaw) : null;
+    if (followUpDateRaw && Number.isNaN(followUpDate!.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid follow-up date',
+      });
     }
 
     // Create consultation
@@ -113,6 +151,7 @@ export const createConsultation = async (req: AuthRequest, res: Response) => {
       data: {
         ...consultationRest,
         heldUntil,
+        followUpDate,
         fee,
         consultationDate: new Date(),
       },
@@ -147,10 +186,10 @@ export const createConsultation = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Held consultations keep the slot active until the doctor finishes (prescription path).
+    // The OPD visit remains in progress until a prescription completes it.
     await prisma.appointment.update({
       where: { id: validatedData.appointmentId },
-      data: { status: heldUntil ? 'IN_PROGRESS' : 'COMPLETED' },
+      data: { status: 'IN_PROGRESS' },
     });
 
     // Log the action
@@ -198,7 +237,9 @@ export const getConsultations = async (req: AuthRequest, res: Response) => {
       where.patientId = patientId;
     }
     
-    if (doctorId) {
+    if (req.user?.role === UserRole.DOCTOR) {
+      where.doctorId = req.user.id;
+    } else if (doctorId) {
       where.doctorId = doctorId;
     }
     
@@ -340,6 +381,13 @@ export const getConsultationById = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (req.user?.role === UserRole.DOCTOR && consultation.doctorId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only access your own consultations',
+      });
+    }
+
     res.json({
       success: true,
       data: { consultation },
@@ -371,9 +419,22 @@ export const updateConsultation = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (
+      req.user?.role === UserRole.DOCTOR &&
+      existingConsultation.doctorId !== req.user.id
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update your own consultations',
+      });
+    }
+
     const updatePayload: {
       diagnosis?: string;
       notes?: string | null;
+      temperature?: number | null;
+      bloodPressure?: string | null;
+      followUpDate?: Date | null;
       heldUntil?: Date | null;
     } = {};
 
@@ -382,6 +443,26 @@ export const updateConsultation = async (req: AuthRequest, res: Response) => {
     }
     if (validatedData.notes !== undefined) {
       updatePayload.notes = validatedData.notes;
+    }
+    if (validatedData.temperature !== undefined) {
+      updatePayload.temperature = validatedData.temperature;
+    }
+    if (validatedData.bloodPressure !== undefined) {
+      updatePayload.bloodPressure = validatedData.bloodPressure;
+    }
+    if (validatedData.followUpDate !== undefined) {
+      if (validatedData.followUpDate === null) {
+        updatePayload.followUpDate = null;
+      } else {
+        const followUpDate = new Date(validatedData.followUpDate);
+        if (Number.isNaN(followUpDate.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid follow-up date',
+          });
+        }
+        updatePayload.followUpDate = followUpDate;
+      }
     }
     if (validatedData.heldUntil !== undefined) {
       if (validatedData.heldUntil === null) {
@@ -392,6 +473,12 @@ export const updateConsultation = async (req: AuthRequest, res: Response) => {
           return res.status(400).json({
             success: false,
             message: 'Invalid heldUntil datetime',
+          });
+        }
+        if (d.getTime() <= Date.now()) {
+          return res.status(400).json({
+            success: false,
+            message: 'heldUntil must be a future date and time',
           });
         }
         updatePayload.heldUntil = d;
@@ -448,16 +535,6 @@ export const updateConsultation = async (req: AuthRequest, res: Response) => {
       newValue: updatedConsultation,
     });
 
-    if (
-      Object.prototype.hasOwnProperty.call(validatedData, 'heldUntil') &&
-      validatedData.heldUntil === null
-    ) {
-      await prisma.appointment.update({
-        where: { id: existingConsultation.appointmentId },
-        data: { status: 'COMPLETED' },
-      });
-    }
-
     res.json({
       success: true,
       message: 'Consultation updated successfully',
@@ -494,6 +571,16 @@ export const deleteConsultation = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({
         success: false,
         message: 'Consultation not found',
+      });
+    }
+
+    if (
+      req.user?.role === UserRole.DOCTOR &&
+      existingConsultation.doctorId !== req.user.id
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only delete your own consultations',
       });
     }
 

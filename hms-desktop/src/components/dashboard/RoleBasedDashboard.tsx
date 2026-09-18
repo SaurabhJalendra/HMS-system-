@@ -118,6 +118,26 @@ const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashb
     }
   };
 
+  const getWidgetNavigation = (widget) => {
+    if (widget?.type === 'prescriptions' || widget?.data === 'pendingPrescriptionsList') {
+      return { action: 'pendingPrescriptions', module: 'prescriptions' };
+    }
+    if (widget?.type === 'inventory' || widget?.data === 'lowStockItems') {
+      return { action: 'stockAlert', module: 'medicines' };
+    }
+    if (
+      widget?.data === 'todayAppointmentsList' ||
+      widget?.data === 'patientQueue' ||
+      widget?.data === 'todaySchedule'
+    ) {
+      return { action: 'todayAppointments', module: 'appointments' };
+    }
+    if (widget?.data === 'recentPatients') {
+      return { action: 'viewPatients', module: 'patients' };
+    }
+    return null;
+  };
+
   const getWidgetContainerStyle = () => ({
     backgroundColor: '#FFFFFF',
     border: '1px solid #E5E7EB',
@@ -187,7 +207,13 @@ const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashb
 
   const renderListWidget = (widget) => {
     const listData = dashboardData[widget.data] || [];
-    
+    const widgetNav = getWidgetNavigation(widget);
+    const openWidgetTarget = () => {
+      if (widgetNav) {
+        handleQuickAction(widgetNav.action, widgetNav.module);
+      }
+    };
+
     return React.createElement(
       'div',
       { style: getWidgetContainerStyle() },
@@ -205,7 +231,28 @@ const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashb
           'No data available'
         ) : listData.slice(0, 5).map((item, index) => React.createElement(
           'div',
-          { key: index, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #F3F4F6' } },
+          {
+            key: index,
+            role: widgetNav ? 'button' : undefined,
+            tabIndex: widgetNav ? 0 : undefined,
+            onClick: widgetNav ? openWidgetTarget : undefined,
+            onKeyDown: widgetNav
+              ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openWidgetTarget();
+                  }
+                }
+              : undefined,
+            style: {
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '8px 0',
+              borderBottom: '1px solid #F3F4F6',
+              cursor: widgetNav ? 'pointer' : 'default',
+            },
+          },
           React.createElement(
             'div',
             null,

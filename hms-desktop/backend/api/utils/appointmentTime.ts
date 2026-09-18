@@ -5,7 +5,7 @@ import { getHospitalConfig } from './hospitalHelper';
  * so "is this slot in the past" only means something in the clinic's own time zone.
  * We read that zone from HospitalConfig and fall back to the server zone.
  */
-function resolveClinicTimeZone(configured?: string | null): string {
+export function resolveClinicTimeZone(configured?: string | null): string {
   const zone = (configured || '').trim();
   if (!zone) {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -16,6 +16,51 @@ function resolveClinicTimeZone(configured?: string | null): string {
   } catch {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   }
+}
+
+function zonedMidnightToUtc(ymd: string, timeZone: string): Date {
+  const [year, month, day] = ymd.split('-').map(Number);
+  const desiredWallClock = Date.UTC(year, month - 1, day);
+  let candidate = desiredWallClock;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(candidate));
+    const pick = (type: string) =>
+      Number(parts.find((part) => part.type === type)?.value || 0);
+    const representedWallClock = Date.UTC(
+      pick('year'),
+      pick('month') - 1,
+      pick('day'),
+      pick('hour') % 24,
+      pick('minute'),
+      pick('second'),
+    );
+    candidate += desiredWallClock - representedWallClock;
+  }
+  return new Date(candidate);
+}
+
+/** UTC bounds for one clinic-local calendar day. */
+export function dayBoundsInTimeZone(
+  ymd: string,
+  configuredTimeZone?: string | null,
+): { start: Date; end: Date } {
+  const timeZone = resolveClinicTimeZone(configuredTimeZone);
+  const [year, month, day] = ymd.split('-').map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + 1));
+  const nextYmd = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+  return {
+    start: zonedMidnightToUtc(ymd, timeZone),
+    end: zonedMidnightToUtc(nextYmd, timeZone),
+  };
 }
 
 /** Current calendar day (YYYY-MM-DD) and minutes past midnight in `timeZone`. */

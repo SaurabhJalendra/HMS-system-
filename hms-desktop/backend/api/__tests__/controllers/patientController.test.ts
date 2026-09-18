@@ -8,6 +8,11 @@ const mockPrisma = {
     findUnique: jest.fn(),
     count: jest.fn(),
   },
+  allergyCatalog: { count: jest.fn() },
+  chronicConditionCatalog: { count: jest.fn() },
+  patientAllergy: { createMany: jest.fn() },
+  patientChronicCondition: { createMany: jest.fn() },
+  $transaction: jest.fn(),
 };
 
 jest.mock('@prisma/client', () => ({
@@ -26,6 +31,7 @@ jest.mock('../../utils/auditLogger', () => ({
 // Mock hospital helper
 jest.mock('../../utils/hospitalHelper', () => ({
   getHospitalId: jest.fn(() => Promise.resolve('hospital-1')),
+  getHospitalConfig: jest.fn(() => Promise.resolve({ timezone: 'Asia/Kolkata' })),
 }));
 
 describe('Patient Controller', () => {
@@ -39,6 +45,13 @@ describe('Patient Controller', () => {
     mockPrisma.patient.findMany.mockReset();
     mockPrisma.patient.findUnique.mockReset();
     mockPrisma.patient.count.mockReset();
+    mockPrisma.allergyCatalog.count.mockReset();
+    mockPrisma.chronicConditionCatalog.count.mockReset();
+    mockPrisma.patientAllergy.createMany.mockReset();
+    mockPrisma.patientChronicCondition.createMany.mockReset();
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma),
+    );
 
     mockReq = {
       body: {},
@@ -127,6 +140,46 @@ describe('Patient Controller', () => {
       await createPatient(mockReq as AuthRequest, mockRes as Response);
 
       expect(mockPrisma.patient.create).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(201);
+    });
+
+    it('creates selected clinical links in the same registration transaction', async () => {
+      mockReq.body = {
+        name: 'Clinical Patient',
+        age: 40,
+        gender: 'FEMALE',
+        phone: '9876543210',
+        address: 'Clinic Road',
+        allergyIds: ['allergy-1'],
+        chronicConditionIds: ['condition-1'],
+      };
+      mockPrisma.patient.findUnique.mockResolvedValue(null);
+      mockPrisma.allergyCatalog.count.mockResolvedValue(1);
+      mockPrisma.chronicConditionCatalog.count.mockResolvedValue(1);
+      mockPrisma.patient.create.mockResolvedValue({
+        id: 'clinical_patient_0000',
+        name: 'Clinical Patient',
+      } as any);
+      mockPrisma.patientAllergy.createMany.mockResolvedValue({ count: 1 });
+      mockPrisma.patientChronicCondition.createMany.mockResolvedValue({ count: 1 });
+
+      await createPatient(mockReq as AuthRequest, mockRes as Response);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(mockPrisma.patientAllergy.createMany).toHaveBeenCalledWith({
+        data: [{
+          patientId: 'clinical_patient_0000',
+          allergyId: 'allergy-1',
+          severity: 'Unknown',
+        }],
+      });
+      expect(mockPrisma.patientChronicCondition.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({
+          patientId: 'clinical_patient_0000',
+          conditionId: 'condition-1',
+          currentStatus: 'Active',
+        })],
+      });
       expect(mockRes.status).toHaveBeenCalledWith(201);
     });
 

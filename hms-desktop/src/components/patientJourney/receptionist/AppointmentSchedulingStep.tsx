@@ -7,14 +7,17 @@ import AppointmentSlotPicker from '../shared/AppointmentSlotPicker';
 interface AppointmentSchedulingStepProps {
   patient: Patient | null;
   onScheduled: (appointment: Appointment) => void;
+  onBack: () => void;
 }
 
-const AppointmentSchedulingStep: React.FC<AppointmentSchedulingStepProps> = ({ patient, onScheduled }) => {
+const AppointmentSchedulingStep: React.FC<AppointmentSchedulingStepProps> = ({ patient, onScheduled, onBack }) => {
   const [creating, setCreating] = React.useState(false);
   const [err, setErr] = React.useState('');
+  const creatingRef = React.useRef(false);
 
   const handleSelect = async (payload: { doctorId: string; date: string; time: string }) => {
-    if (!patient) return;
+    if (!patient || creatingRef.current) return;
+    creatingRef.current = true;
     setErr('');
     setCreating(true);
     try {
@@ -29,6 +32,7 @@ const AppointmentSchedulingStep: React.FC<AppointmentSchedulingStepProps> = ({ p
     } catch (e: any) {
       setErr(e?.response?.data?.message || e?.message || 'Failed to create appointment');
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
   };
@@ -47,7 +51,16 @@ const AppointmentSchedulingStep: React.FC<AppointmentSchedulingStepProps> = ({ p
       <AppointmentSlotPicker
         patientId={patient?.id ?? null}
         onSelect={handleSelect}
+        submitting={creating}
       />
+      <button
+        type="button"
+        onClick={onBack}
+        disabled={creating}
+        style={{ marginTop: 12, padding: '8px 12px', border: '1px solid #D1D5DB', borderRadius: 6, backgroundColor: '#FFF', cursor: creating ? 'not-allowed' : 'pointer' }}
+      >
+        ← Change patient
+      </button>
       {creating && <p style={{ marginTop: 12, fontSize: 14, color: '#6B7280' }}>Scheduling…</p>}
     </div>
   );

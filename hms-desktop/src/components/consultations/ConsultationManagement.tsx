@@ -9,15 +9,34 @@ import { getInfoContent } from '../../lib/infoContent';
 import AppointmentSlotPicker from '../patientJourney/shared/AppointmentSlotPicker';
 import { toLocalYmd } from '../../lib/utils/localDate';
 
+const patientAgeLabel = (patient: any): string => {
+  if (Number.isFinite(Number(patient?.age))) return `${Number(patient.age)} years`;
+  if (patient?.dateOfBirth) {
+    const birthDate = new Date(patient.dateOfBirth);
+    if (!Number.isNaN(birthDate.getTime())) {
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const beforeBirthday =
+        today.getMonth() < birthDate.getMonth() ||
+        (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate());
+      if (beforeBirthday) age -= 1;
+      return `${Math.max(0, age)} years`;
+    }
+  }
+  return 'Age not recorded';
+};
+
 const ConsultationManagement = ({
   onBack: _onBack,
   user,
   appointmentData,
+  initialAction,
   onNavigate,
 }: {
   onBack?: any;
   user?: any;
   appointmentData?: any;
+  initialAction?: string | null;
   isAuthenticated?: boolean;
   onNavigate?: (module: string, action?: any) => void;
 }) => {
@@ -33,7 +52,9 @@ const ConsultationManagement = ({
   const [filterPatient, setFilterPatient] = useState('');
   const [currentPage, _setCurrentPage] = useState(1);
   const [_totalPages, setTotalPages] = useState(1);
-  const [activeTab, setActiveTab] = useState('appointments'); // 'appointments' or 'consultations'
+  const [activeTab, setActiveTab] = useState(
+    initialAction === 'consultationHistory' ? 'consultations' : 'appointments',
+  ); // 'appointments' or 'consultations'
   
   // Form states
   const [formData, setFormData] = useState({
@@ -129,8 +150,16 @@ const ConsultationManagement = ({
 
   const loadPatients = async () => {
     try {
-      const response = await patientService.getPatients({ page: 1, limit: 1000 });
-      setPatients(response.patients);
+      const allPatients = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const response = await patientService.getPatients({ page, limit: 100 });
+        allPatients.push(...(response.patients || []));
+        totalPages = response.pagination?.totalPages || 1;
+        page += 1;
+      } while (page <= totalPages);
+      setPatients(allPatients);
     } catch (err) {
       console.error('Error loading patients:', err);
     }
@@ -147,19 +176,22 @@ const ConsultationManagement = ({
 
   const loadAppointments = async () => {
     try {
-      // Load all appointments that are available for consultation
-      // Filter to show SCHEDULED, CONFIRMED, and IN_PROGRESS appointments
-      const response = await appointmentService.getAppointments({ 
-        page: 1, 
-        limit: 1000,
-      });
+      const allAppointments = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const response = await appointmentService.getAppointments({ page, limit: 100 });
+        allAppointments.push(...(response.appointments || []));
+        totalPages = response.pagination?.totalPages || 1;
+        page += 1;
+      } while (page <= totalPages);
       
-      // Filter appointments to show only those available for consultation
-      // (SCHEDULED, CONFIRMED, IN_PROGRESS) and exclude CANCELLED and COMPLETED
-      const availableAppointments = (response.appointments || []).filter(apt => 
-        apt.status === 'SCHEDULED' || 
-        apt.status === 'CONFIRMED' || 
-        apt.status === 'IN_PROGRESS'
+      // New consultations may start only for today's active visits. Held or
+      // historical work is resumed through the OPD queue.
+      const today = toLocalYmd();
+      const availableAppointments = allAppointments.filter(apt =>
+        ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'].includes(apt.status) &&
+        toLocalYmd(apt.date) === today
       );
       
       // Sort by date (most recent first)
@@ -1009,7 +1041,7 @@ const ConsultationManagement = ({
                       patient && React.createElement(
                         'div',
                         { style: { fontSize: '12px', color: '#6B7280' } },
-                        `${patient.age} years, ${patient.gender}`
+                        `${patientAgeLabel(patient)}, ${patient.gender || 'Gender not recorded'}`
                       )
                     )
                   ),
@@ -1212,7 +1244,9 @@ const ConsultationManagement = ({
                     'div',
                     { style: { fontSize: '12px', color: '#6B7280' } },
                     (() => {
-                      return consultation.patient ? `${consultation.patient.age} years, ${consultation.patient.gender}` : 'Unknown';
+                      return consultation.patient
+                        ? `${patientAgeLabel(consultation.patient)}, ${consultation.patient.gender || 'Gender not recorded'}`
+                        : 'Unknown';
                     })()
                   )
                 )

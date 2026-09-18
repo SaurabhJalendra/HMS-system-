@@ -3,7 +3,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { logAudit } from '../utils/auditLogger';
-import { getHospitalId } from '../utils/hospitalHelper';
+import { getHospitalConfig, getHospitalId } from '../utils/hospitalHelper';
+import { dayBoundsInTimeZone } from '../utils/appointmentTime';
 
 const prisma = new PrismaClient();
 
@@ -74,6 +75,10 @@ const patientCreateSchema = z.object({
 });
 
 const patientUpdateSchema = patientCreateSchema.partial();
+const patientClinicalLinksSchema = z.object({
+  allergyIds: z.array(z.string().min(1)).max(100).optional().default([]),
+  chronicConditionIds: z.array(z.string().min(1)).max(100).optional().default([]),
+});
 
 // Helper function to calculate age from date of birth
 const calculateAge = (dateOfBirth: Date): number => {
@@ -142,6 +147,7 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
     console.log('[CreatePatient] Received request body:', JSON.stringify(req.body, null, 2));
     
     const validatedData = patientCreateSchema.parse(req.body);
+    const clinicalLinks = patientClinicalLinksSchema.parse(req.body);
     console.log('[CreatePatient] Validated data:', JSON.stringify(validatedData, null, 2));
 
     // Convert age to dateOfBirth if age is provided but dateOfBirth is not
@@ -214,13 +220,55 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
           `${(finalPatientData.name.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || 'patient')}_0000`
         );
 
-    // Create patient with explicit id (human-readable, no CUID)
-    const patient = await prisma.patient.create({
-      data: {
-        id: patientId,
-        ...finalPatientData,
-        phone: finalPatientData.phone as string,
-      },
+    const allergyIds = [...new Set(clinicalLinks.allergyIds)];
+    const conditionIds = [...new Set(clinicalLinks.chronicConditionIds)];
+    const [allergyCount, conditionCount] = await Promise.all([
+      allergyIds.length
+        ? prisma.allergyCatalog.count({ where: { id: { in: allergyIds }, isActive: true } })
+        : 0,
+      conditionIds.length
+        ? prisma.chronicConditionCatalog.count({
+            where: { id: { in: conditionIds }, isActive: true },
+          })
+        : 0,
+    ]);
+    if (allergyCount !== allergyIds.length || conditionCount !== conditionIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'One or more selected allergies or chronic conditions are missing or inactive',
+      });
+    }
+
+    // Patient demographics and selected clinical links are one atomic
+    // registration. A linking failure rolls the patient insert back.
+    const patient = await prisma.$transaction(async (tx) => {
+      const created = await tx.patient.create({
+        data: {
+          id: patientId,
+          ...finalPatientData,
+          phone: finalPatientData.phone as string,
+        },
+      });
+      if (allergyIds.length) {
+        await tx.patientAllergy.createMany({
+          data: allergyIds.map((allergyId) => ({
+            patientId: created.id,
+            allergyId,
+            severity: 'Unknown',
+          })),
+        });
+      }
+      if (conditionIds.length) {
+        await tx.patientChronicCondition.createMany({
+          data: conditionIds.map((conditionId) => ({
+            patientId: created.id,
+            conditionId,
+            diagnosisDate: new Date(),
+            currentStatus: 'Active',
+          })),
+        });
+      }
+      return created;
     });
 
     // Log the action
@@ -307,7 +355,9 @@ export const getPatients = async (req: AuthRequest, res: Response) => {
     if (createdFrom) {
       const [y, m, d] = createdFrom.split('-').map(Number);
       if (y && m && d) {
-        where.createdAt = { gte: new Date(y, m - 1, d, 0, 0, 0, 0) };
+        const config = await getHospitalConfig();
+        const bounds = dayBoundsInTimeZone(createdFrom, config?.timezone);
+        where.createdAt = { gte: bounds.start, lt: bounds.end };
       }
     }
 

@@ -199,6 +199,10 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
               <AppointmentSchedulingStep
                 patient={receptionistPatient}
                 onScheduled={handleReceptionistScheduled}
+                onBack={() => {
+                  setReceptionistPatient(null);
+                  setReceptionistStep('registration');
+                }}
               />
             )}
             {receptionistStep === 'confirmation' && receptionistPatient && receptionistAppointment && (
@@ -261,9 +265,10 @@ const PatientJourneyModule: React.FC<PatientJourneyModuleProps> = ({ user, isAut
                 appointment={selectedAppointment}
                 doctorId={user.id}
                 resumeConsultationId={
-                  selectedAppointment.consultations?.[0]?.heldUntil
+                  createdConsultationIdValue ||
+                  (selectedAppointment.consultations?.[0]?.heldUntil
                     ? selectedAppointment.consultations[0].id
-                    : null
+                    : null)
                 }
                 onSuccess={handleConsultationSuccess}
                 onBack={handleDoctorBackToQueue}

@@ -178,7 +178,7 @@ export const getAllMedicines = async (req: AuthRequest, res: Response) => {
   try {
     const { category, lowStock } = req.query;
     
-    const where: any = {};
+    const where: any = { isActive: true };
     if (category) where.category = category;
     if (lowStock === 'true') {
       where.stockQuantity = { lte: prisma.medicineCatalog.fields.lowStockThreshold };

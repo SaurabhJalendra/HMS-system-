@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
 import prescriptionService from '../../lib/api/services/prescriptionService';
 import medicineService from '../../lib/api/services/medicineService';
 import patientService from '../../lib/api/services/patientService';
@@ -6,7 +7,6 @@ import appointmentService from '../../lib/api/services/appointmentService';
 import userService from '../../lib/api/services/userService';
 import auditService from '../../lib/api/services/auditService';
 import configService from '../../lib/api/services/configService';
-import consultationService from '../../lib/api/services/consultationService';
 import PrescriptionPDFGenerator from '../../lib/utils/prescriptionPDFGenerator';
 import PrescriptionInventoryAudit from './PrescriptionInventoryAudit';
 import InfoButton from '../common/InfoButton';
@@ -75,7 +75,10 @@ const PrescriptionCancellationModal: React.FC<PrescriptionCancellationModalProps
   </div>
 );
 
-const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
+const isPendingPrescriptionAction = (action) =>
+  action === 'pendingPrescriptions' || action === 'dispenseMedicine';
+
+const PrescriptionManagement = ({ user, isAuthenticated, onBack, initialAction }) => {
   const { formatCurrency: formatCurrencyUtil, config: hospitalConfig } = useHospitalConfig();
   const [activeTab, setActiveTab] = useState('list'); // 'list', 'stats'
   const [prescriptions, setPrescriptions] = useState([]);
@@ -86,9 +89,14 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(searchTerm, 350);
+  const [statusFilter, setStatusFilter] = useState(
+    isPendingPrescriptionAction(initialAction) ? 'ACTIVE' : ''
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const prescriptionListRequestRef = useRef(0);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [stats, setStats] = useState(null);
   const [showInventoryAudit, setShowInventoryAudit] = useState(false);
@@ -101,61 +109,69 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
   const [cancellationBusy, setCancellationBusy] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      loadData();
+    setAppliedSearch(debouncedSearch);
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    if (isPendingPrescriptionAction(initialAction)) {
+      setStatusFilter('ACTIVE');
+      setCurrentPage(1);
+      setActiveTab('list');
     }
-  }, [isAuthenticated, currentPage, searchTerm, statusFilter, activeTab]);
+  }, [initialAction]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadSupportingData();
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadPrescriptions();
+      if (activeTab === 'stats') {
+        loadStats();
+      }
+    }
+  }, [isAuthenticated, currentPage, appliedSearch, statusFilter, activeTab]);
 
   // Hospital config is now provided by HospitalConfigContext
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      // Check if user is authenticated
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        setError('❌ User not authenticated. Please log in.');
-        return;
-      }
-
-      console.log('Loading data for user:', user);
-      console.log('Token exists:', !!token);
-
-      await Promise.all([
-        loadPrescriptions(),
-        loadPatients(),
-        loadMedicines(),
-        loadDoctors()
-      ]);
-      
-      if (activeTab === 'stats') {
-        await loadStats();
-      }
-    } catch (err) {
-      setError('❌ Failed to load data: ' + (err.response?.data?.message || err.message));
-      console.error('Error loading data:', err);
-    } finally {
-      setLoading(false);
+  const loadSupportingData = async () => {
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      setError('❌ User not authenticated. Please log in.');
+      return;
     }
+    await Promise.all([loadPatients(), loadMedicines(), loadDoctors()]);
   };
 
   const loadPrescriptions = async () => {
+    const requestId = ++prescriptionListRequestRef.current;
     try {
       const params = {
         page: currentPage,
         limit: 20,
-        ...(searchTerm && { search: searchTerm }),
+        ...(appliedSearch && { search: appliedSearch }),
         ...(statusFilter && { status: statusFilter }),
       };
       
       const response = await prescriptionService.getPrescriptions(params);
+      if (requestId !== prescriptionListRequestRef.current) return;
+      const nextTotalPages = Math.max(1, response.pagination?.totalPages || 1);
+      if (currentPage > nextTotalPages) {
+        setCurrentPage(nextTotalPages);
+        return;
+      }
       setPrescriptions(response.prescriptions || []);
-      setTotalPages(response.pagination?.totalPages || 1);
-      setError(null);
+      setTotalPages(nextTotalPages);
+      setError('');
     } catch (err) {
+      if (requestId !== prescriptionListRequestRef.current) return;
       console.error('Error loading prescriptions:', err);
       setPrescriptions([]);
       setTotalPages(1);
+      setError('❌ Failed to load prescriptions: ' + (err.response?.data?.message || err.message));
     }
   };
 
@@ -337,90 +353,11 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
       const prescriptionResponse = await prescriptionService.getPrescriptionById(prescriptionId);
       const prescription = prescriptionResponse.prescription;
       // hospitalConfig is now provided by HospitalConfigContext
-      const patientId = prescription.patient?.id;
-      
-      // Fetch patient consultation history (excluding current consultation if linked)
-      let consultationHistory = [];
-      if (patientId) {
-        try {
-          console.log('📋 Fetching consultation history for patient:', patientId);
-          console.log('📋 Current prescription consultation ID:', prescription.consultationId);
-          
-          // Use getConsultations with patientId and higher limit to get all consultations
-          const historyResponse = await consultationService.getConsultations({ 
-            patientId, 
-            limit: 50, // Get more consultations to ensure we have history
-            page: 1 
-          });
-          
-          console.log('📋 Consultation history API response:', historyResponse);
-          console.log('📋 Response type:', typeof historyResponse);
-          console.log('📋 Has consultations property:', 'consultations' in historyResponse);
-          
-          // Extract consultations from response (handles paginated response structure)
-          let consultations = [];
-          if (historyResponse && typeof historyResponse === 'object') {
-            if (Array.isArray(historyResponse)) {
-              // If response is directly an array
-              consultations = historyResponse;
-            } else if (historyResponse.consultations && Array.isArray(historyResponse.consultations)) {
-              // If response has consultations property (paginated response)
-              consultations = historyResponse.consultations;
-            }
-          }
-          
-          console.log('📋 Extracted consultations:', consultations);
-          console.log('📋 Number of consultations found:', consultations.length);
-          
-          // Filter out the current consultation if it exists
-          consultationHistory = consultations.filter(
-            cons => {
-              const isCurrent = cons.id === prescription.consultationId;
-              if (isCurrent) {
-                console.log('📋 Filtering out current consultation:', cons.id);
-              }
-              return !isCurrent;
-            }
-          );
-          
-          console.log('📋 After filtering current consultation:', consultationHistory.length);
-          
-          // Sort by date descending (most recent first) and limit to last 10 consultations
-          consultationHistory = consultationHistory
-            .sort((a, b) => {
-              const dateA = new Date(a.consultationDate || a.createdAt || 0);
-              const dateB = new Date(b.consultationDate || b.createdAt || 0);
-              return dateB.getTime() - dateA.getTime();
-            })
-            .slice(0, 10);
-          
-          console.log('📋 Final processed consultation history:', consultationHistory);
-          console.log('📋 History items count:', consultationHistory.length);
-          
-          // Log each history item for debugging
-          consultationHistory.forEach((cons, index) => {
-            console.log(`📋 History ${index + 1}:`, {
-              id: cons.id,
-              date: cons.consultationDate || cons.createdAt,
-              diagnosis: cons.diagnosis,
-              notes: cons.notes,
-              doctor: cons.doctor?.fullName
-            });
-          });
-        } catch (err) {
-          console.error('❌ Failed to fetch consultation history:', err);
-          console.error('❌ Error name:', err.name);
-          console.error('❌ Error message:', err.message);
-          console.error('❌ Error stack:', err.stack);
-          if (err.response) {
-            console.error('❌ Error response status:', err.response.status);
-            console.error('❌ Error response data:', err.response.data);
-          }
-          // Continue without history if fetch fails
-        }
-      } else {
-        console.warn('⚠️ No patient ID available for fetching consultation history');
-      }
+      // The prescription endpoint returns only this patient's limited print
+      // history, so Pharmacy does not need broad access to /consultations.
+      const consultationHistory = (prescription.patient?.consultations || [])
+        .filter((consultation) => consultation.id !== prescription.consultationId)
+        .slice(0, 10);
       
       // Prepare prescription data for PDF generation
       // Map prescriptionItems to items for the PDF generator
@@ -604,10 +541,19 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
         React.createElement(
           'input',
           {
-            type: 'text',
+            type: 'search',
             placeholder: 'Search prescriptions...',
             value: searchTerm,
-            onChange: (e) => setSearchTerm(e.target.value),
+            onChange: (e) => {
+              setCurrentPage(1);
+              setSearchTerm(e.target.value);
+            },
+            onKeyDown: (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                setAppliedSearch(searchTerm);
+              }
+            },
             style: { padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }
           }
         ),
@@ -615,7 +561,10 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
           'select',
           {
             value: statusFilter,
-            onChange: (e) => setStatusFilter(e.target.value),
+            onChange: (e) => {
+              setCurrentPage(1);
+              setStatusFilter(e.target.value);
+            },
             style: { padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }
           },
           React.createElement('option', { value: '' }, 'All Statuses'),
@@ -626,7 +575,13 @@ const PrescriptionManagement = ({ user, isAuthenticated, onBack }) => {
         React.createElement(
           'button',
           {
-            onClick: loadPrescriptions,
+            onClick: () => {
+              if (appliedSearch === searchTerm) {
+                loadPrescriptions();
+              } else {
+                setAppliedSearch(searchTerm);
+              }
+            },
             style: {
               backgroundColor: '#6C757D',
               color: '#FFFFFF',

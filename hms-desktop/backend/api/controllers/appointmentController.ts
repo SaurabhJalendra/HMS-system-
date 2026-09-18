@@ -86,7 +86,7 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
         },
         time: validatedData.time,
         status: {
-          not: AppointmentStatus.CANCELLED,
+          notIn: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
         },
       },
     });
@@ -210,9 +210,26 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
             select: {
               id: true,
               name: true,
+              age: true,
               dateOfBirth: true,
               gender: true,
               phone: true,
+              address: true,
+              bloodGroup: true,
+              allergies: true,
+              chronicConditions: true,
+              consultations: {
+                select: {
+                  id: true,
+                  diagnosis: true,
+                  notes: true,
+                  consultationDate: true,
+                  createdAt: true,
+                  doctor: { select: { fullName: true } },
+                },
+                orderBy: { consultationDate: 'desc' },
+                take: 5,
+              },
             },
           },
           doctor: {
@@ -408,7 +425,7 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
           },
           time: newTime,
           status: {
-            not: AppointmentStatus.CANCELLED,
+            notIn: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
           },
         },
       });

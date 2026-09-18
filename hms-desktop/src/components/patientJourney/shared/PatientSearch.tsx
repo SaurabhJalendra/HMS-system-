@@ -54,27 +54,30 @@ async function loadScheduledDoctors(patientIds: string[]): Promise<Record<string
   const map: Record<string, string> = {};
   if (patientIds.length === 0) return map;
   try {
-    const { appointments } = await appointmentService.getAppointments({
-      page: 1,
-      limit: 100,
-    });
     const today = toLocalYmd(new Date());
-    const upcoming = (appointments || []).filter((apt) => {
-      if (!ACTIVE_APPOINTMENT_STATUSES.has(apt.status)) return false;
-      const aptDay = toLocalYmd(apt.date);
-      return !aptDay || aptDay >= today;
-    });
-    upcoming.sort((a, b) => {
-      const day = String(a.date).localeCompare(String(b.date));
-      if (day !== 0) return day;
-      return String(a.time || '').localeCompare(String(b.time || ''));
-    });
     const wanted = new Set(patientIds);
-    upcoming.forEach((apt) => {
-      if (!wanted.has(apt.patientId) || map[apt.patientId]) return;
-      const name = apt.doctor?.fullName?.trim();
-      if (name) map[apt.patientId] = name;
-    });
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const response = await appointmentService.getAppointments({ page, limit: 100 });
+      const upcoming = (response.appointments || [])
+        .filter((apt) => {
+          if (!ACTIVE_APPOINTMENT_STATUSES.has(apt.status)) return false;
+          const aptDay = toLocalYmd(apt.date);
+          return !aptDay || aptDay >= today;
+        })
+        .sort((a, b) => {
+          const day = String(a.date).localeCompare(String(b.date));
+          return day || String(a.time || '').localeCompare(String(b.time || ''));
+        });
+      upcoming.forEach((apt) => {
+        if (!wanted.has(apt.patientId) || map[apt.patientId]) return;
+        const name = apt.doctor?.fullName?.trim();
+        if (name) map[apt.patientId] = name;
+      });
+      totalPages = response.pagination?.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages && Object.keys(map).length < wanted.size);
   } catch (err) {
     console.error('Scheduled doctor lookup failed', err);
   }
@@ -101,7 +104,10 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
   const [error, setError] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [doctorByPatientId, setDoctorByPatientId] = useState<Record<string, string>>({});
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const searchRequestRef = useRef(0);
 
   const loadRecent = useCallback(async () => {
     setRecentLoading(true);
@@ -134,7 +140,7 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
     return () => document.removeEventListener('mousedown', onDocMouseDown);
   }, []);
 
-  const runSearch = useCallback(async (raw: string) => {
+  const runSearch = useCallback(async (raw: string, page = 1) => {
     const q = raw.trim();
     if (q.length < MIN_QUERY_LENGTH) {
       setResults([]);
@@ -145,16 +151,21 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
     setLoading(true);
     setSearched(true);
     setError('');
+    const requestId = ++searchRequestRef.current;
     try {
       const searchTerm = buildSearchTerm(q);
-      const { patients } = await patientService.getPatients({
+      const { patients, pagination } = await patientService.getPatients({
         search: searchTerm,
         limit: SEARCH_LIMIT,
-        page: 1,
+        page,
       });
+      if (requestId !== searchRequestRef.current) return;
       setResults(patients || []);
+      setCurrentPage(page);
+      setTotalPages(Math.max(1, pagination?.totalPages || 1));
       setDropdownOpen(true);
     } catch (err: any) {
+      if (requestId !== searchRequestRef.current) return;
       console.error('Patient search error:', err);
       const msg =
         err?.response?.data?.message ||
@@ -163,7 +174,7 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
       setError(msg);
       setResults([]);
     } finally {
-      setLoading(false);
+      if (requestId === searchRequestRef.current) setLoading(false);
     }
   }, []);
 
@@ -176,7 +187,7 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
       return;
     }
     const timer = window.setTimeout(() => {
-      void runSearch(query);
+      void runSearch(query, 1);
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [query, runSearch]);
@@ -226,7 +237,7 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                void runSearch(query);
+                void runSearch(query, 1);
               }
               if (e.key === 'Escape') setDropdownOpen(false);
             }}
@@ -244,7 +255,7 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
           />
           <button
             type="button"
-            onClick={() => void runSearch(query)}
+            onClick={() => void runSearch(query, 1)}
             style={{
               backgroundColor: '#4B5563',
               color: '#FFF',
@@ -263,6 +274,8 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
               setQuery('');
               setSearched(false);
               setResults([]);
+              setCurrentPage(1);
+              setTotalPages(1);
               setDropdownOpen(false);
               void loadRecent();
             }}
@@ -398,6 +411,25 @@ const PatientSearch: React.FC<PatientSearchProps> = ({
           </tbody>
         </table>
       </div>
+      {showingSearchResults && totalPages > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <button
+            type="button"
+            disabled={loading || currentPage <= 1}
+            onClick={() => void runSearch(query, currentPage - 1)}
+          >
+            Previous
+          </button>
+          <span style={{ fontSize: 13 }}>Page {currentPage} of {totalPages}</span>
+          <button
+            type="button"
+            disabled={loading || currentPage >= totalPages}
+            onClick={() => void runSearch(query, currentPage + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 };

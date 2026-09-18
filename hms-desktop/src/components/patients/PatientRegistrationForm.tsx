@@ -279,34 +279,11 @@ const PatientRegistrationForm: React.FC<PatientRegistrationFormProps> = ({
         emergencyContactName: formData.emergencyContactName,
         emergencyContactPhone: formData.emergencyContactPhone,
         referredBy: formData.referredBy,
+        allergyIds: selectedAllergies,
+        chronicConditionIds: selectedConditions,
       };
 
       const created = await patientService.createPatient(patientData);
-
-      for (const conditionId of selectedConditions) {
-        try {
-          await catalogService.addPatientChronicCondition(created.id, {
-            conditionId,
-            diagnosisDate: new Date().toISOString().split('T')[0],
-            currentStatus: 'Active',
-            notes: '',
-          });
-        } catch (conditionError) {
-          console.warn('Failed to add condition:', conditionError);
-        }
-      }
-
-      for (const allergyId of selectedAllergies) {
-        try {
-          await catalogService.addPatientAllergy(created.id, {
-            allergyId,
-            severity: 'Unknown',
-            notes: '',
-          });
-        } catch (allergyError) {
-          console.warn('Failed to add allergy:', allergyError);
-        }
-      }
 
       setFormData(getInitialPatientRegistrationFormData());
       setSelectedConditions([]);
