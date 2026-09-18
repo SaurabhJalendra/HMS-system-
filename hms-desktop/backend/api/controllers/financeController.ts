@@ -70,16 +70,16 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
       }),
     ]);
 
-    const opdRevenue = opdBills.reduce((sum, bill: any) => {
+    const opdRevenue = opdBills.reduce((sum, bill) => {
       const eventDate = cashEventDate(bill.paidAt, bill.createdAt);
       if (!isDateInsideRange(eventDate, start, end)) return sum;
-      return sum + cashReceivedForInvoice(bill.paymentStatus, Number(bill.totalAmount), bill.paidAmount);
+      return sum + cashReceivedForInvoice(bill.paymentStatus, bill.totalAmount, bill.paidAmount);
     }, 0);
 
     const ipdRevenue = ipdBills.reduce((sum, bill) => {
       const eventDate = cashEventDate(bill.updatedAt, bill.createdAt);
       if (!isDateInsideRange(eventDate, start, end)) return sum;
-      return sum + cashReceivedForInvoice(bill.status, Number(bill.totalAmount), bill.paidAmount);
+      return sum + cashReceivedForInvoice(bill.status, bill.totalAmount, bill.paidAmount);
     }, 0);
 
     const totalRevenue = opdRevenue + ipdRevenue;
