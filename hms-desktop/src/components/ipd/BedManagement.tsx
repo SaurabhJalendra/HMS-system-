@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import bedService from '../../lib/api/services/bedService';
 import wardService from '../../lib/api/services/wardService';
+import { fetchAllPages } from '../../lib/utils/fetchAllPages';
 
 const BedManagement = ({ onBack, isAuthenticated }) => {
   const [beds, setBeds] = useState([]);
   const [wards, setWards] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingBed, setEditingBed] = useState(null);
@@ -38,12 +42,15 @@ const BedManagement = ({ onBack, isAuthenticated }) => {
     } else {
       setError('Please login to access bed management');
     }
-  }, [isAuthenticated, searchTerm, filterWard, filterBedType, filterStatus]);
+  }, [isAuthenticated, searchTerm, filterWard, filterBedType, filterStatus, currentPage]);
 
   const loadWards = async () => {
     try {
-      const response = await wardService.getWards({ page: 1, limit: 100 });
-      setWards(response.wards || []);
+      const wardsList = await fetchAllPages(async (page, limit) => {
+        const response = await wardService.getWards({ page, limit });
+        return { items: response.wards || [], totalPages: response.pagination?.totalPages };
+      });
+      setWards(wardsList);
     } catch (err) {
       console.error('Error loading wards:', err);
     }
@@ -53,8 +60,8 @@ const BedManagement = ({ onBack, isAuthenticated }) => {
     setLoading(true);
     try {
       const params = {
-        page: 1,
-        limit: 100,
+        page: currentPage,
+        limit: 20,
         ...(filterWard && { wardId: filterWard }),
         ...(filterBedType && { bedType: filterBedType }),
         ...(filterStatus && { 
@@ -79,6 +86,11 @@ const BedManagement = ({ onBack, isAuthenticated }) => {
       
       console.log(`✅ Loaded ${bedsList.length} beds`);
       setBeds(bedsList);
+      const nextTotalPages = Math.max(1, response?.pagination?.totalPages || response?.data?.pagination?.totalPages || 1);
+      setTotalPages(nextTotalPages);
+      if (currentPage > nextTotalPages) {
+        setCurrentPage(nextTotalPages);
+      }
       setError('');
     } catch (err) {
       console.error('❌ Error loading beds:', err);
@@ -142,12 +154,14 @@ const BedManagement = ({ onBack, isAuthenticated }) => {
         console.log('✅ Bed updated:', updated);
         setShowEditForm(false);
         setEditingBed(null);
-        setError('✅ Bed updated successfully!');
+        setSuccess('✅ Bed updated successfully!');
+        setError('');
       } else {
         const created = await bedService.createBed(bedData);
         console.log('✅ Bed created:', created);
         setShowAddForm(false);
-        setError('✅ Bed created successfully!');
+        setSuccess('✅ Bed created successfully!');
+        setError('');
       }
 
       // Reload all data
@@ -224,7 +238,8 @@ const BedManagement = ({ onBack, isAuthenticated }) => {
     try {
       await bedService.deleteBed(bedId);
       await loadBeds();
-      setError('✅ Bed deleted successfully!');
+      setSuccess('✅ Bed deleted successfully!');
+      setError('');
     } catch (err) {
       if (err.response?.status === 401) {
         setError('Authentication required. Please login first.');
@@ -246,7 +261,8 @@ const BedManagement = ({ onBack, isAuthenticated }) => {
       if (bed) {
         await bedService.updateBed(bedId, { isActive: !bed.isActive });
         await loadBeds();
-        setError('✅ Bed status updated successfully!');
+        setSuccess('✅ Bed status updated successfully!');
+        setError('');
       }
     } catch (err) {
       if (err.response?.status === 401) {
@@ -572,14 +588,28 @@ const BedManagement = ({ onBack, isAuthenticated }) => {
         )
       ),
 
-      // Error/Success Message
+      success && React.createElement(
+        'div',
+        {
+          style: {
+            backgroundColor: '#D1FAE5',
+            border: '1px solid #A7F3D0',
+            color: '#065F46',
+            padding: '12px',
+            marginBottom: '8px',
+            fontSize: '14px',
+            borderRadius: '4px'
+          }
+        },
+        success
+      ),
       error && React.createElement(
         'div',
         {
           style: {
-            backgroundColor: error.includes('✅') ? '#D1FAE5' : '#FEF2F2',
-            border: `1px solid ${error.includes('✅') ? '#A7F3D0' : '#FECACA'}`,
-            color: error.includes('✅') ? '#065F46' : '#DC2626',
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FECACA',
+            color: '#DC2626',
             padding: '12px',
             marginBottom: '8px',
             fontSize: '14px',
@@ -868,6 +898,31 @@ const BedManagement = ({ onBack, isAuthenticated }) => {
             )
           )
         )
+      )
+    ),
+    totalPages > 1 && React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8' } },
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => setCurrentPage((page) => Math.max(1, page - 1)),
+          disabled: currentPage === 1,
+          style: { padding: '6px 12px', cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }
+        },
+        'Previous'
+      ),
+      React.createElement('span', { style: { fontSize: '13px' } }, `Page ${currentPage} of ${totalPages}`),
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => setCurrentPage((page) => Math.min(totalPages, page + 1)),
+          disabled: currentPage >= totalPages,
+          style: { padding: '6px 12px', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer' }
+        },
+        'Next'
       )
     ),
 

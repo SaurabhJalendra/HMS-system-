@@ -114,6 +114,10 @@ export const isAdminLevelRole = (userRole: UserRole | string | undefined): boole
 export const canMutatePatientRecord = (userRole: UserRole | string | undefined): boolean =>
   Boolean(userRole) && userRole !== UserRole.PHARMACY;
 
+/** Receptionists can list consultations for billing; only clinicians and admins mutate them. */
+export const canMutateConsultation = (userRole: UserRole | string | undefined): boolean =>
+  isAdminLevelRole(userRole) || userRole === UserRole.DOCTOR;
+
 /** Doctors and admins may edit ACTIVE prescriptions. Doctors may edit only their own. */
 export const canEditPrescription = (
   userRole: UserRole | string | undefined,
@@ -242,7 +246,7 @@ export const getRoleDashboardWidgets = (userRole) => {
   const widgets = {
     [UserRole.ADMIN]: [
       { type: 'stats', title: 'System Overview', data: ['totalUsers', 'totalPatients', 'totalAppointments'] },
-      { type: 'chart', title: 'User Activity', data: 'userActivity' },
+      { type: 'recent', title: 'User Activity', data: 'userActivity' },
       { type: 'alerts', title: 'System Alerts', data: 'systemAlerts' },
       { type: 'recent', title: 'Recent Activities', data: 'recentActivities' },
       { type: 'recent', title: 'Recent Users', data: 'recentUsers' },
@@ -250,7 +254,7 @@ export const getRoleDashboardWidgets = (userRole) => {
     ],
     [UserRole.SUBADMIN]: [
       { type: 'stats', title: 'System Overview', data: ['totalUsers', 'totalPatients', 'totalAppointments'] },
-      { type: 'chart', title: 'User Activity', data: 'userActivity' },
+      { type: 'recent', title: 'User Activity', data: 'userActivity' },
       { type: 'alerts', title: 'System Alerts', data: 'systemAlerts' },
       { type: 'recent', title: 'Recent Activities', data: 'recentActivities' },
       { type: 'recent', title: 'Recent Users', data: 'recentUsers' },

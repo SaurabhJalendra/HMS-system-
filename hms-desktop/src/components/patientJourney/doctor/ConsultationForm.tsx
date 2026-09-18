@@ -83,11 +83,16 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
     });
   };
 
+  const pendingLinkedLabs = existingLabTests.filter(
+    (test) => test.status === 'PENDING' || test.status === 'IN_PROGRESS',
+  );
+  const resumeBlockedByPendingLabs = Boolean(resumeConsultationId) && pendingLinkedLabs.length > 0;
+
   useEffect(() => {
     let cancelled = false;
     setLoadingCatalog(true);
     labTestService
-      .getTestCatalog(true)
+      .getTestCatalog(true, true)
       .then((data) => {
         if (!cancelled && data?.testCatalog) {
           setCatalog(data.testCatalog.filter((t) => t.isActive !== false));
@@ -183,10 +188,37 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
     };
   }, [appointment.id, patientId, resumeConsultationId]);
 
+  const orderSelectedLabs = async (consultationId: string) => {
+    for (const testCatalogId of selectedTestIds) {
+      await labTestService.createLabTest({
+        patientId,
+        orderedBy: doctorId,
+        testCatalogId,
+        consultationId,
+        appointmentId: appointment.id,
+        notes: notes.trim() || undefined,
+      });
+    }
+  };
+
+  const openLinkedReport = async (testId: string) => {
+    try {
+      await labTestService.downloadLabTestReport(testId);
+    } catch {
+      setError('Could not open the lab report.');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!diagnosis.trim()) {
       setError('Diagnosis is required.');
+      return;
+    }
+    if (resumeBlockedByPendingLabs) {
+      setError(
+        `Cannot complete this consultation while ${pendingLinkedLabs.length} lab test${pendingLinkedLabs.length === 1 ? '' : 's'} ${pendingLinkedLabs.length === 1 ? 'is' : 'are'} still pending or in progress. Hold again or wait for results.`,
+      );
       return;
     }
     setLoading(true);
@@ -201,6 +233,7 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
           followUpDate: followUpDate || null,
           heldUntil: null,
         });
+        await orderSelectedLabs(activeConsultationId);
         onSuccess(activeConsultationId);
         return;
       }
@@ -215,6 +248,7 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
         bloodPressure: bloodPressure.trim() || undefined,
         followUpDate: followUpDate || undefined,
       });
+      await orderSelectedLabs(consultation.id);
       onSuccess(consultation.id);
     } catch (err: unknown) {
       const e = err as { existingConsultationId?: string; response?: { data?: { message?: string } }; message?: string };
@@ -228,6 +262,7 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
             followUpDate: followUpDate || null,
             heldUntil: null,
           });
+          await orderSelectedLabs(e.existingConsultationId);
           onSuccess(e.existingConsultationId);
         } catch (inner) {
           const ie = inner as { response?: { data?: { message?: string } }; message?: string };
@@ -291,16 +326,7 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
         setActiveConsultationId(cid);
       }
 
-      for (const testCatalogId of selectedTestIds) {
-        await labTestService.createLabTest({
-          patientId,
-          orderedBy: doctorId,
-          testCatalogId,
-          consultationId: cid,
-          appointmentId: appointment.id,
-          notes: notes.trim() || undefined,
-        });
-      }
+      await orderSelectedLabs(cid);
 
       onHoldComplete?.();
     } catch (err: unknown) {
@@ -317,16 +343,7 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
             heldUntil: heldIso,
           });
           setActiveConsultationId(cid);
-          for (const testCatalogId of selectedTestIds) {
-            await labTestService.createLabTest({
-              patientId,
-              orderedBy: doctorId,
-              testCatalogId,
-              consultationId: cid,
-              appointmentId: appointment.id,
-              notes: notes.trim() || undefined,
-            });
-          }
+          await orderSelectedLabs(cid);
           onHoldComplete?.();
         } catch {
           setError('A consultation already exists. Open it from the queue with “Resume (held — lab)”.');
@@ -468,27 +485,29 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
               ) : existingLabTests.length === 0 ? (
                 <p style={{ margin: '6px 0 0', fontSize: 13, color: '#6B7280' }}>No linked lab orders.</p>
               ) : (
-                existingLabTests.map((test) => (
-                  <div key={test.id} style={{ marginTop: 6, fontSize: 13 }}>
-                    {test.testNameSnapshot} — <strong>{test.status}</strong>
-                    {test.results ? <div style={{ color: '#374151' }}>Result: {test.results}</div> : null}
-                    {test.reportFile ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          window.open(
-                            `/api/uploads/${test.reportFile!.split(/[\\/]/).pop()}`,
-                            '_blank',
-                            'noopener,noreferrer',
-                          )
-                        }
-                        style={{ marginTop: 3, padding: 0, border: 0, color: '#2563EB', background: 'transparent', textDecoration: 'underline', cursor: 'pointer', fontSize: 13 }}
-                      >
-                        View report
-                      </button>
-                    ) : null}
-                  </div>
-                ))
+                <>
+                  {resumeBlockedByPendingLabs && (
+                    <p style={{ margin: '6px 0 0', fontSize: 13, color: '#B45309' }}>
+                      {pendingLinkedLabs.length} linked test{pendingLinkedLabs.length === 1 ? '' : 's'} still pending.
+                      Save is blocked until results are entered; you can hold again if the patient should return later.
+                    </p>
+                  )}
+                  {existingLabTests.map((test) => (
+                    <div key={test.id} style={{ marginTop: 6, fontSize: 13 }}>
+                      {test.testNameSnapshot} — <strong>{test.status}</strong>
+                      {test.results ? <div style={{ color: '#374151' }}>Result: {test.results}</div> : null}
+                      {test.reportFile ? (
+                        <button
+                          type="button"
+                          onClick={() => openLinkedReport(test.id)}
+                          style={{ marginTop: 3, padding: 0, border: 0, color: '#2563EB', background: 'transparent', textDecoration: 'underline', cursor: 'pointer', fontSize: 13 }}
+                        >
+                          View report
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           )}
@@ -614,18 +633,18 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
           </button>
           <button
             type="submit"
-            disabled={loading || !diagnosis.trim()}
+            disabled={loading || !diagnosis.trim() || resumeBlockedByPendingLabs}
             style={{
               padding: '10px 16px',
-              backgroundColor: loading || !diagnosis.trim() ? '#9CA3AF' : '#059669',
+              backgroundColor: loading || !diagnosis.trim() || resumeBlockedByPendingLabs ? '#9CA3AF' : '#059669',
               color: '#FFF',
               border: 'none',
               borderRadius: '6px',
-              cursor: loading || !diagnosis.trim() ? 'not-allowed' : 'pointer',
+              cursor: loading || !diagnosis.trim() || resumeBlockedByPendingLabs ? 'not-allowed' : 'pointer',
               fontWeight: 500,
             }}
           >
-            Save consultation → Write prescription
+            {resumeBlockedByPendingLabs ? 'Save blocked — labs still pending' : 'Save consultation → Write prescription'}
           </button>
         </div>
       </form>

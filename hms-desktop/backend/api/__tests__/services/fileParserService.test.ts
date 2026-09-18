@@ -22,10 +22,10 @@ describe('FileParserService Excel imports', () => {
     return file;
   }
 
-  it('maps required columns by header regardless of column order', async () => {
+  it('maps the 3 pack columns by header regardless of column order', async () => {
     const file = writeWorkbook([{
-      'Batch Number': 'BATCH-100',
-      'Current Quantity': 25,
+      'Tablets per strip': 10,
+      'Strips': 12,
       'Item Name': 'ExampleMed',
     }]);
 
@@ -34,42 +34,46 @@ describe('FileParserService Excel imports', () => {
     expect(medicines).toHaveLength(1);
     expect(medicines[0]).toMatchObject({
       name: 'ExampleMed',
-      batchNumber: 'BATCH-100',
       category: 'General',
       price: 0,
-      stockQuantity: 25,
+      stockQuantity: 120,
+      tabletsPerStrip: 10,
+      strips: 12,
       lowStockThreshold: 10,
+    });
+  });
+
+  it('still accepts a legacy Current Quantity file', async () => {
+    const file = writeWorkbook([{
+      'Current Quantity': 25,
+      'Item Name': 'ExampleMed',
+    }]);
+
+    const medicines = await FileParserService.parseExcel(file);
+    expect(medicines[0]).toMatchObject({
+      name: 'ExampleMed',
+      stockQuantity: 25,
     });
   });
 
   it('rejects a workbook that is missing a required column', async () => {
     const file = writeWorkbook([{
       'Item Name': 'ExampleMed',
-      'Current Quantity': 25,
     }]);
 
     await expect(FileParserService.parseExcel(file)).rejects.toThrow(
-      'Missing required column(s): Batch Number',
+      'Missing required column(s): Strips',
     );
   });
 
-  it('accepts zero current quantity but rejects an empty required cell', async () => {
+  it('accepts zero strips', async () => {
     const validFile = writeWorkbook([{
       'Item Name': 'Out of stock medicine',
-      'Current Quantity': 0,
-      'Batch Number': 'ZERO-1',
+      'Strips': 0,
+      'Tablets per strip': 10,
     }]);
     await expect(FileParserService.parseExcel(validFile)).resolves.toMatchObject([
-      { name: 'Out of stock medicine', stockQuantity: 0, batchNumber: 'ZERO-1' },
+      { name: 'Out of stock medicine', stockQuantity: 0, tabletsPerStrip: 10 },
     ]);
-
-    const invalidFile = writeWorkbook([{
-      'Item Name': 'Missing batch',
-      'Current Quantity': 5,
-      'Batch Number': '',
-    }]);
-    await expect(FileParserService.parseExcel(invalidFile)).rejects.toThrow(
-      'Row 2: missing required field(s): Batch Number',
-    );
   });
 });

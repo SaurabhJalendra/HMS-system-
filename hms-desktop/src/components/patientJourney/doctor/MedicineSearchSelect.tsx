@@ -5,6 +5,10 @@ export interface MedicineOption {
   name: string;
   code?: string;
   genericName?: string;
+  packDisplay?: string;
+  stockQuantity?: number;
+  tabletsPerStrip?: number | null;
+  stockStatus?: 'OK' | 'LOW';
 }
 
 function formatMedicine(m: MedicineOption): string {
@@ -206,6 +210,12 @@ const MedicineSearchSelect: React.FC<MedicineSearchSelectProps> = ({
                 {m.genericName && (
                   <span style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginTop: 2 }}>
                     {m.genericName}
+                  </span>
+                )}
+                {(m.packDisplay || m.stockStatus) && (
+                  <span style={{ display: 'block', fontSize: 12, color: m.stockStatus === 'LOW' ? '#B45309' : '#6B7280', marginTop: 2 }}>
+                    Stock {m.packDisplay || m.stockQuantity || 0}
+                    {m.stockStatus === 'LOW' ? ' · low' : ''}
                   </span>
                 )}
               </button>

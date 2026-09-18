@@ -8,6 +8,7 @@ import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
 import AppointmentSlotPicker from '../patientJourney/shared/AppointmentSlotPicker';
 import { toLocalYmd } from '../../lib/utils/localDate';
+import { canMutateConsultation } from '../../lib/utils/rolePermissions';
 
 const patientAgeLabel = (patient: any): string => {
   if (Number.isFinite(Number(patient?.age))) return `${Number(patient.age)} years`;
@@ -50,8 +51,9 @@ const ConsultationManagement = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDoctor, setFilterDoctor] = useState('');
   const [filterPatient, setFilterPatient] = useState('');
-  const [currentPage, _setCurrentPage] = useState(1);
-  const [_totalPages, setTotalPages] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const canEditConsultations = canMutateConsultation(user?.role);
   const [activeTab, setActiveTab] = useState(
     initialAction === 'consultationHistory' ? 'consultations' : 'appointments',
   ); // 'appointments' or 'consultations'
@@ -279,6 +281,10 @@ const ConsultationManagement = ({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!showEditForm && !formData.appointmentId) {
+      setError('Appointment is required. Select a visit or start one from OPD Flow.');
+      return;
+    }
     setLoading(true);
     
     try {
@@ -352,7 +358,9 @@ const ConsultationManagement = ({
     try {
       await consultationService.deleteConsultation(consultationId);
       await loadConsultations(); // Reload from database
-      setError('✅ Consultation deleted successfully!');
+      setSuccess('✅ Consultation deleted successfully!');
+      setError('');
+      setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       if (err.response?.status === 401) {
         setError('Authentication required. Please login first.');
@@ -487,7 +495,7 @@ const ConsultationManagement = ({
             React.createElement(
               'label',
               { style: { display: 'block', marginBottom: '4px', fontWeight: '500', color: '#111827', fontSize: '14px' } },
-              'Appointment (Optional)'
+              'Appointment'
             ),
             React.createElement(
               'select',
@@ -495,7 +503,7 @@ const ConsultationManagement = ({
                 name: 'appointmentId',
                 value: formData.appointmentId,
                 onChange: handleInputChange,
-                required: false,
+                required: true,
                 style: {
                   width: '100%',
                   padding: '8px 12px',
@@ -505,11 +513,11 @@ const ConsultationManagement = ({
                   backgroundColor: '#FFFFFF'
                 }
               },
-              React.createElement('option', { value: '' }, appointments.length === 0 ? 'No Available Appointments' : 'Select Appointment (Optional)'),
+              React.createElement('option', { value: '' }, appointments.length === 0 ? 'No Available Appointments' : 'Select Appointment'),
               appointments.length === 0 ? React.createElement(
                 'option',
                 { value: '', disabled: true },
-                'No appointments available. You can still create a consultation without linking to an appointment.'
+                'No appointments available. Create or resume a visit from OPD Flow first.'
               ) : appointments.map(appointment => {
                 // Use patient from appointment if available, otherwise find from patients list
                 const patient = appointment.patient || patients.find(p => p.id === appointment.patientId);
@@ -1293,7 +1301,7 @@ const ConsultationManagement = ({
               React.createElement(
                 'td',
                 { style: { padding: '12px', textAlign: 'center' } },
-                React.createElement(
+                canEditConsultations ? React.createElement(
                   'div',
                   {
                     style: {
@@ -1336,10 +1344,39 @@ const ConsultationManagement = ({
                     },
                     'Delete'
                   )
-                )
+                ) : React.createElement('span', { style: { color: '#6B7280', fontSize: '12px' } }, 'View only')
               )
             ))
           )
+        )
+      ),
+      totalPages > 1 && React.createElement(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: '1px solid #E5E7EB' } },
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => setCurrentPage((page) => Math.max(1, page - 1)),
+            disabled: currentPage === 1,
+            style: { padding: '6px 12px', border: '1px solid #D1D5DB', borderRadius: '4px', backgroundColor: '#FFFFFF', cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }
+          },
+          'Previous'
+        ),
+        React.createElement(
+          'span',
+          { style: { fontSize: '13px', color: '#374151' } },
+          `Page ${currentPage} of ${totalPages}`
+        ),
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => setCurrentPage((page) => Math.min(totalPages, page + 1)),
+            disabled: currentPage >= totalPages,
+            style: { padding: '6px 12px', border: '1px solid #D1D5DB', borderRadius: '4px', backgroundColor: '#FFFFFF', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer' }
+          },
+          'Next'
         )
       )
     )

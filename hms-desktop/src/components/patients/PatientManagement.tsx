@@ -329,12 +329,19 @@ const PatientManagement = ({ user }: any = {}) => {
       const patientData = await patientService.getPatientById(patient.id);
       
       // Load existing chronic conditions and allergies
-      const [chronicConditionsResponse, allergiesResponse] = await Promise.all([
+      const [chronicConditionsResponse, allergiesResponse] = await Promise.allSettled([
         catalogService.getPatientChronicConditions(patient.id),
         catalogService.getPatientAllergies(patient.id)
       ]);
-      const existingConditionIds = chronicConditionsResponse.conditions.map(c => c.conditionId);
-      const existingAllergyIds = allergiesResponse.allergies.map(a => a.allergyId);
+      const existingConditionIds = chronicConditionsResponse.status === 'fulfilled'
+        ? chronicConditionsResponse.value.conditions.map(c => c.conditionId)
+        : [];
+      const existingAllergyIds = allergiesResponse.status === 'fulfilled'
+        ? allergiesResponse.value.allergies.map(a => a.allergyId)
+        : [];
+      if (chronicConditionsResponse.status === 'rejected' || allergiesResponse.status === 'rejected') {
+        setError('Patient loaded, but allergies or chronic conditions could not be refreshed. You can still edit the rest of the record.');
+      }
       setSelectedConditions(existingConditionIds);
       setSelectedAllergies(existingAllergyIds);
       

@@ -12,7 +12,7 @@ const OTDashboard = ({ user, onBack }) => {
     const load = async () => {
       try {
         setLoading(true);
-        const [roomRes, surgeryRes, listRes] = await Promise.all([
+        const [roomRes, surgeryRes, listRes] = await Promise.allSettled([
           otService.getOTRoomStats(),
           otService.getSurgeryStats(),
           otService.getSurgeries({
@@ -21,8 +21,15 @@ const OTDashboard = ({ user, onBack }) => {
             limit: 20,
           }),
         ]);
-        setStats({ roomStats: roomRes?.data, surgeryStats: surgeryRes?.data });
-        setSurgeriesToday(listRes?.data?.surgeries || []);
+        setStats({
+          roomStats: roomRes.status === 'fulfilled' ? roomRes.value?.data : null,
+          surgeryStats: surgeryRes.status === 'fulfilled' ? surgeryRes.value?.data : null,
+        });
+        setSurgeriesToday(listRes.status === 'fulfilled' ? listRes.value?.data?.surgeries || [] : []);
+        const failed = [roomRes, surgeryRes, listRes].find((result) => result.status === 'rejected');
+        if (failed && failed.status === 'rejected') {
+          setError(failed.reason?.response?.data?.message || failed.reason?.message || 'Some OT dashboard data failed to load');
+        }
       } catch (e) {
         setError(e?.response?.data?.message || 'Failed to load OT dashboard');
       } finally {

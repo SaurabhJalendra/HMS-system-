@@ -16,6 +16,8 @@ export interface ParsedMedicine {
   currency?: string; // Detected currency from column header (e.g., "INR", "USD")
   priceColumnHeader?: string; // Original column header (e.g., "Price(INR)")
   stockQuantity: number;
+  tabletsPerStrip?: number;
+  strips?: number;
   lowStockThreshold: number;
   expiryDate?: Date;
 }
@@ -69,14 +71,26 @@ export class FileParserService {
       // Column position is intentionally irrelevant. Imports need only the
       // identity and inventory fields; all clinical/pricing metadata is optional.
       const normalizedHeaders = Object.keys(data[0] as Record<string, unknown>).map(normalizeColumnName);
+      const hasHeader = (aliases: string[]) =>
+        aliases.some((alias) => normalizedHeaders.includes(normalizeColumnName(alias)));
       const requiredHeaders = [
         { label: 'Item Name', aliases: ['item name', 'medicine name', 'name', 'medicine', 'drug name', 'product name'] },
-        { label: 'Current Quantity', aliases: ['current quantity', 'current qty', 'current stock', 'quantity', 'stock', 'stock quantity', 'available stock', 'qty', 'units'] },
-        { label: 'Batch Number', aliases: ['batch number', 'batch no', 'batch', 'lot number', 'lot no'] },
       ];
+      const stripAliases = ['strips', 'no of strips', 'number of strips', 'strip count'];
+      const perStripAliases = ['tablets per strip', 'tablet per strip', 'medicines per strip', 'units per strip', 'per strip'];
+      const quantityAliases = ['current quantity', 'current qty', 'current stock', 'quantity', 'stock', 'stock quantity', 'available stock', 'qty', 'units'];
+      const hasStrips = hasHeader(stripAliases);
+      const hasPerStrip = hasHeader(perStripAliases);
+      const hasQuantity = hasHeader(quantityAliases);
       const missingHeaders = requiredHeaders
-        .filter(({ aliases }) => !aliases.some((alias) => normalizedHeaders.includes(normalizeColumnName(alias))))
+        .filter(({ aliases }) => !hasHeader(aliases))
         .map(({ label }) => label);
+      if (!hasStrips && !hasQuantity) {
+        missingHeaders.push('Strips');
+      }
+      if (hasStrips && !hasPerStrip) {
+        missingHeaders.push('Tablets per strip');
+      }
 
       if (missingHeaders.length > 0) {
         throw new Error(`Missing required column(s): ${missingHeaders.join(', ')}`);
@@ -211,17 +225,29 @@ export class FileParserService {
           'Current Quantity', 'Current Qty', 'Current Stock', 'Quantity', 'Stock', 'stock_quantity', 'Stock Quantity',
           'Available Stock', 'available_stock', 'Qty', 'qty', 'Units', 'units'
         );
-        const stockQuantity = Number(quantityStr);
+        const stripsStr = getColumnValue(
+          row,
+          'Strips', 'No of Strips', 'Number of Strips', 'Strip Count'
+        );
+        const tabletsPerStripStr = getColumnValue(
+          row,
+          'Tablets per strip', 'Tablet per strip', 'Medicines per strip', 'Units per strip', 'Per strip'
+        );
+        const strips = stripsStr ? Number(stripsStr) : NaN;
+        const tabletsPerStrip = tabletsPerStripStr ? Number(tabletsPerStripStr) : NaN;
+        const stockQuantity = Number.isInteger(strips) && strips >= 0 && Number.isInteger(tabletsPerStrip) && tabletsPerStrip >= 1
+          ? strips * tabletsPerStrip
+          : Number(quantityStr);
 
         const missingFields: string[] = [];
         if (!name.trim()) missingFields.push('Item Name');
-        if (!quantityStr.trim()) missingFields.push('Current Quantity');
-        if (!batchNumber.trim()) missingFields.push('Batch Number');
+        if (!Number.isInteger(strips) && !quantityStr.trim()) missingFields.push('Strips');
+        if (Number.isInteger(strips) && !Number.isInteger(tabletsPerStrip)) missingFields.push('Tablets per strip');
         if (missingFields.length) {
           throw new Error(`Row ${index + 2}: missing required field(s): ${missingFields.join(', ')}`);
         }
         if (!Number.isInteger(stockQuantity) || stockQuantity < 0) {
-          throw new Error(`Row ${index + 2}: Current Quantity must be a whole number (0 or greater)`);
+          throw new Error(`Row ${index + 2}: Strips x tablets per strip must be a whole number (0 or greater)`);
         }
         
         // Parse low stock threshold
@@ -268,6 +294,8 @@ export class FileParserService {
           currency: detectedCurrency || undefined, // Include detected currency
           priceColumnHeader: priceColumnHeader || undefined, // Include original column header
           stockQuantity,
+          strips: Number.isInteger(strips) ? strips : undefined,
+          tabletsPerStrip: Number.isInteger(tabletsPerStrip) && tabletsPerStrip >= 1 ? tabletsPerStrip : undefined,
           lowStockThreshold: lowStockThreshold,
           expiryDate: expiryDate
         };

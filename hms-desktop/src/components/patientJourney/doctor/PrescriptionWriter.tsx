@@ -56,7 +56,16 @@ const PrescriptionWriter: React.FC<PrescriptionWriterProps> = ({
 }) => {
   useCriticalUpdateLock(true, 'prescription');
   const [medicines, setMedicines] = useState<
-    Array<{ id: string; name: string; code?: string; genericName?: string }>
+    Array<{
+      id: string;
+      name: string;
+      code?: string;
+      genericName?: string;
+      packDisplay?: string;
+      stockQuantity?: number;
+      tabletsPerStrip?: number | null;
+      stockStatus?: 'OK' | 'LOW';
+    }>
   >([]);
   const [lines, setLines] = useState<PrescriptionLine[]>([createEmptyLine()]);
   const [notes, setNotes] = useState('');
@@ -83,6 +92,10 @@ const PrescriptionWriter: React.FC<PrescriptionWriterProps> = ({
             name: medicine.name,
             code: medicine.code,
             genericName: medicine.genericName,
+            packDisplay: medicine.packDisplay,
+            stockQuantity: medicine.stockQuantity,
+            tabletsPerStrip: medicine.tabletsPerStrip,
+            stockStatus: medicine.stockStatus,
           })),
       );
     } catch (requestError: any) {

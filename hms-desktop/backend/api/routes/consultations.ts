@@ -17,32 +17,32 @@ router.use(authenticateToken);
 
 // @route   GET /api/consultations
 // @desc    Get all consultations with search and pagination
-// @access  Private (Admin, Doctor, Receptionist — receptionist needs read access for billing)
-router.get('/', requireRole(UserRole.ADMIN, UserRole.DOCTOR, UserRole.RECEPTIONIST), getConsultations);
+// @access  Private (Admin, Sub-admin, Doctor, Receptionist — receptionist needs read access for billing)
+router.get('/', requireRole(UserRole.ADMIN, UserRole.SUBADMIN, UserRole.DOCTOR, UserRole.RECEPTIONIST), getConsultations);
 
 // @route   GET /api/consultations/stats
 // @desc    Get consultation statistics
-// @access  Private (Admin, Doctor)
-router.get('/stats', requireRole(UserRole.ADMIN, UserRole.DOCTOR), getConsultationStats);
+// @access  Private (Admin, Sub-admin, Doctor)
+router.get('/stats', requireRole(UserRole.ADMIN, UserRole.SUBADMIN, UserRole.DOCTOR), getConsultationStats);
 
 // @route   GET /api/consultations/:id
 // @desc    Get consultation by ID
-// @access  Private (Admin, Doctor, Receptionist)
-router.get('/:id', requireRole(UserRole.ADMIN, UserRole.DOCTOR, UserRole.RECEPTIONIST), getConsultationById);
+// @access  Private (Admin, Sub-admin, Doctor, Receptionist)
+router.get('/:id', requireRole(UserRole.ADMIN, UserRole.SUBADMIN, UserRole.DOCTOR, UserRole.RECEPTIONIST), getConsultationById);
 
 // @route   POST /api/consultations
 // @desc    Create new consultation
-// @access  Private (Admin, Doctor)
-router.post('/', requireRole(UserRole.ADMIN, UserRole.DOCTOR), createConsultation);
+// @access  Private (Admin, Sub-admin, Doctor)
+router.post('/', requireRole(UserRole.ADMIN, UserRole.SUBADMIN, UserRole.DOCTOR), createConsultation);
 
 // @route   PUT /api/consultations/:id
 // @desc    Update consultation
-// @access  Private (Admin, Doctor)
-router.put('/:id', requireRole(UserRole.ADMIN, UserRole.DOCTOR), updateConsultation);
+// @access  Private (Admin, Sub-admin, Doctor)
+router.put('/:id', requireRole(UserRole.ADMIN, UserRole.SUBADMIN, UserRole.DOCTOR), updateConsultation);
 
 // @route   DELETE /api/consultations/:id
 // @desc    Delete consultation
-// @access  Private (Admin, Doctor)
-router.delete('/:id', requireRole(UserRole.ADMIN, UserRole.DOCTOR), deleteConsultation);
+// @access  Private (Admin, Sub-admin, Doctor)
+router.delete('/:id', requireRole(UserRole.ADMIN, UserRole.SUBADMIN, UserRole.DOCTOR), deleteConsultation);
 
 export { router as consultationRoutes };

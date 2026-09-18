@@ -9,8 +9,9 @@ import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { formatCurrencySync, getCurrencySymbol } from '../../lib/utils/currencyAndTimezone';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
 import { isAdminLevelRole } from '../../lib/utils/rolePermissions';
+import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
 
-const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
+const LabTestManagement = ({ user, isAuthenticated, onBack, initialAction }: any) => {
   const { displayCurrency } = useHospitalConfig();
   const [labTests, setLabTests] = useState([]);
   const [testCatalog, setTestCatalog] = useState([]);
@@ -22,10 +23,25 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
   const [showResultForm, setShowResultForm] = useState(false);
   const [editingLabTest, setEditingLabTest] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebouncedValue(searchTerm, 350);
   const [filterStatus, setFilterStatus] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [activeTab, setActiveTab] = useState('tests');
+  const [reportFrom, setReportFrom] = useState('');
+  const [reportTo, setReportTo] = useState('');
+  const [reportData, setReportData] = useState(null);
+  const [showCatalogForm, setShowCatalogForm] = useState(false);
+  const [editingCatalogItem, setEditingCatalogItem] = useState(null);
+  const [catalogForm, setCatalogForm] = useState({
+    testName: '',
+    description: '',
+    category: 'General',
+    price: '',
+    units: '',
+    referenceRange: '',
+    isActive: true,
+  });
   const [stats, setStats] = useState(null);
   const [selectedDoctorForHistory, setSelectedDoctorForHistory] = useState(null);
   const [doctorHistoryTests, setDoctorHistoryTests] = useState([]);
@@ -95,14 +111,32 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
   };
 
   useEffect(() => {
+    if (!initialAction) return;
+    const action = typeof initialAction === 'string' ? initialAction : initialAction.action;
+    if (action === 'pendingTests' || action === 'enterResults') {
+      setActiveTab('tests');
+      setFilterStatus('PENDING');
+      setCurrentPage(1);
+    } else if (action === 'testReports') {
+      setActiveTab('reports');
+    }
+  }, [initialAction]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, filterStatus]);
+
+  useEffect(() => {
     if (isAuthenticated) {
       loadData();
-      loadAvailableTests();
+      if (user.role === 'LAB_TECH' || isAdminLevelRole(user.role)) {
+        loadAvailableTests();
+      }
       if (user.role === 'LAB_TECH') {
         loadMySelectedTests();
       }
     }
-  }, [isAuthenticated, currentPage, filterStatus, searchTerm]);
+  }, [isAuthenticated, currentPage, filterStatus, debouncedSearch]);
 
   // Sync main test checkboxes when modal opens based on saved datapoint selections
   // Also load saved prices for tests
@@ -145,49 +179,49 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [labTestsRes, catalogRes, patientsRes, doctorsRes] = await Promise.all([
+      const [labTestsRes, catalogRes, patientsRes, doctorsRes] = await Promise.allSettled([
         labTestService.getLabTests({ 
           page: currentPage, 
           limit: 20,
           status: filterStatus || undefined,
-          search: searchTerm || undefined
+          search: debouncedSearch || undefined
         }),
         labTestService.getTestCatalog(),
-        patientService.getPatients({ page: 1, limit: 1000 }),
-        userService.getUsers({ role: 'DOCTOR', page: 1, limit: 1000 })
+        patientService.getPatients({ page: 1, limit: 100 }),
+        userService.getUsers({ role: 'DOCTOR', page: 1, limit: 100 })
       ]);
 
-      // Handle lab tests - services return data directly, not wrapped in success
-      if (labTestsRes) {
-        const labTests = labTestsRes.labTests || labTestsRes.data?.labTests || [];
-        const pagination = labTestsRes.pagination || labTestsRes.data?.pagination || { totalPages: 1 };
-        setLabTests(labTests);
+      const failures = [];
+
+      if (labTestsRes.status === 'fulfilled' && labTestsRes.value) {
+        const payload = labTestsRes.value;
+        const nextLabTests = payload.labTests || payload.data?.labTests || [];
+        const pagination = payload.pagination || payload.data?.pagination || { totalPages: 1 };
+        setLabTests(nextLabTests);
         setTotalPages(pagination.totalPages || 1);
-        console.log('Loaded lab tests:', labTests.length);
+      } else {
+        failures.push('lab orders');
       }
 
-      // Handle catalog
-      if (catalogRes) {
-        const catalog = catalogRes.testCatalog || catalogRes.data?.testCatalog || [];
+      if (catalogRes.status === 'fulfilled' && catalogRes.value) {
+        const catalog = catalogRes.value.testCatalog || catalogRes.value.data?.testCatalog || [];
         setTestCatalog(catalog);
-        console.log('Loaded catalog tests:', catalog.length);
+      } else {
+        failures.push('catalog');
       }
 
-      // Handle patients
-      if (patientsRes) {
-        const patientList = patientsRes.patients || patientsRes.data?.patients || [];
-        setPatients(patientList);
-        console.log('Loaded patients:', patientList.length);
+      if (patientsRes.status === 'fulfilled' && patientsRes.value) {
+        setPatients(patientsRes.value.patients || patientsRes.value.data?.patients || []);
+      } else {
+        failures.push('patients');
       }
 
-      // Handle doctors
-      if (doctorsRes) {
-        const doctorList = doctorsRes.users || doctorsRes.data?.users || [];
-        setDoctors(doctorList);
-        console.log('Loaded doctors:', doctorList.length);
+      if (doctorsRes.status === 'fulfilled' && doctorsRes.value) {
+        setDoctors(doctorsRes.value.users || doctorsRes.value.data?.users || []);
+      } else {
+        failures.push('doctors');
       }
 
-      // Load stats fresh
       try {
         const statsRes = await labTestService.getLabTestStats();
         if (statsRes) {
@@ -197,6 +231,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
         console.error('Error loading stats:', err);
       }
 
+      setError(failures.length > 0 ? `Failed to load ${failures.join(', ')}` : '');
     } catch (error) {
       console.error('Error loading data:', error);
       setError('Failed to load data');
@@ -247,6 +282,8 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
       
       // Group by lab type
       const byType = {};
+      const serverPrices = {};
+      const serverDatapoints = {};
       selections.forEach(selection => {
         const labType = selection.labType || 'General';
         if (!byType[labType]) {
@@ -255,8 +292,22 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
         if (selection.testCatalog) {
           byType[labType].push(selection.testCatalog);
         }
+        const catalogId = selection.testCatalog?.id || selection.testCatalogId;
+        if (catalogId && selection.customPrice != null) {
+          serverPrices[catalogId] = Number(selection.customPrice);
+        }
+        if (catalogId && selection.selectedDatapoints) {
+          serverDatapoints[catalogId] = selection.selectedDatapoints;
+          saveDpForTest(catalogId, selection.selectedDatapoints);
+        }
       });
       setMySelectedTestsByType(byType);
+      if (Object.keys(serverPrices).length > 0) {
+        setTechPriceEdits(prev => ({ ...prev, ...serverPrices }));
+      }
+      if (Object.keys(serverDatapoints).length > 0) {
+        setDpSelections(prev => ({ ...prev, ...serverDatapoints }));
+      }
     } catch (error) {
       console.error('Error loading my selected tests:', error);
     }
@@ -277,16 +328,9 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
     }
 
     // Validate lab type is one of the allowed values
-    const validLabTypes = ['ALL TESTS', 'General', 'MRI', 'CT Scan', 'X-Ray', 'Ultrasound', 'Pathology'];
+    const validLabTypes = ['ALL', 'ALL TESTS', 'General', 'MRI', 'CT Scan', 'X-Ray', 'Ultrasound', 'Pathology'];
     if (!validLabTypes.includes(selectedLabType)) {
       setError(`Invalid lab type. Must be one of: ${validLabTypes.join(', ')}`);
-      return;
-    }
-    
-    // If "ALL TESTS" is selected, handle it specially
-    if (selectedLabType === 'ALL TESTS') {
-      setError('Please select a specific lab type to assign tests. Use "ALL TESTS" only for viewing.');
-      setLoading(false);
       return;
     }
 
@@ -309,10 +353,17 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
       }
 
       // Prepare request payload with strict type checking
+      const numericPrices = {};
+      Object.entries(techPriceEdits || {}).forEach(([id, price]) => {
+        const parsed = parseFloat(price);
+        if (!isNaN(parsed) && parsed >= 0) numericPrices[id] = parsed;
+      });
       const requestPayload = {
         technicianId: String(user.id).trim(),
         testCatalogIds: testCatalogIds,
-        labType: String(selectedLabType).trim()
+        labType: selectedLabType === 'ALL TESTS' ? 'ALL' : String(selectedLabType).trim(),
+        datapointsByTest: dpSelections,
+        pricesByTest: numericPrices,
       };
 
       // Final validation before sending
@@ -528,7 +579,6 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
       const updateData = {
         results: formattedResults,
         notes: resultData.notes,
-        reportFile: resultData.reportFile || editingLabTest?.reportFile || '',
         status: 'COMPLETED',
         performedBy: user.id
       };
@@ -733,6 +783,14 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
       reportFile: labTest.reportFile || ''
     });
     setShowResultForm(true);
+    if (labTest.status === 'PENDING' && (user.role === 'LAB_TECH' || isAdminLevelRole(user.role))) {
+      labTestService.startLabTest(labTest.id).then(() => {
+        setLabTests(prev => prev.map(item => item.id === labTest.id ? { ...item, status: 'IN_PROGRESS' } : item));
+        setEditingLabTest(prev => prev && prev.id === labTest.id ? { ...prev, status: 'IN_PROGRESS' } : prev);
+      }).catch(() => {
+        /* keep the form open even if start-in-progress fails */
+      });
+    }
   };
 
   const resetForm = () => {
@@ -809,7 +867,8 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
       { id: 'tests', label: 'Lab Tests', icon: '🧪' },
       { id: 'catalog', label: 'Test Catalog', icon: '📋' },
       ...(user.role === 'LAB_TECH' ? [{ id: 'myTests', label: 'My Tests', icon: '👤' }] : []),
-      { id: 'stats', label: 'Statistics', icon: '📊' }
+      { id: 'stats', label: 'Statistics', icon: '📊' },
+      { id: 'reports', label: 'Reports', icon: '📑' }
     ];
 
     return React.createElement(
@@ -868,7 +927,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
           },
           React.createElement('option', { value: '' }, 'All Statuses'),
           React.createElement('option', { value: 'PENDING' }, 'Pending'),
-          user.role !== 'LAB_TECH' && React.createElement('option', { value: 'IN_PROGRESS' }, 'In Progress'),
+          React.createElement('option', { value: 'IN_PROGRESS' }, 'In Progress'),
           React.createElement('option', { value: 'COMPLETED' }, 'Completed'),
           React.createElement('option', { value: 'CANCELLED' }, 'Cancelled')
         ),
@@ -976,13 +1035,28 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
                   React.createElement(
                     'div',
                     { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
-                    user.role !== 'LAB_TECH' && React.createElement(
+                    isAdminLevelRole(user.role) && test.status !== 'COMPLETED' && React.createElement(
                       'button',
                       {
                         onClick: () => handleEdit(test),
                         className: 'text-blue-600 hover:text-blue-900 cursor-pointer'
                       },
                       'Edit'
+                    ),
+                    test.status === 'PENDING' && (user.role === 'LAB_TECH' || isAdminLevelRole(user.role)) && React.createElement(
+                      'button',
+                      {
+                        onClick: async () => {
+                          try {
+                            await labTestService.startLabTest(test.id);
+                            await loadData();
+                          } catch (err) {
+                            setError(err.response?.data?.message || 'Failed to start test');
+                          }
+                        },
+                        className: 'text-amber-600 hover:text-amber-900 cursor-pointer'
+                      },
+                      'Start'
                     ),
                     (test.status === 'PENDING' || test.status === 'IN_PROGRESS') && (user.role === 'LAB_TECH' || isAdminLevelRole(user.role)) && React.createElement(
                       'button',
@@ -999,6 +1073,23 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
                         className: 'text-red-600 hover:text-red-900 cursor-pointer'
                       },
                       'Cancel'
+                    ),
+                    (test.status === 'PENDING' || test.status === 'IN_PROGRESS') && (user.role === 'LAB_TECH' || isAdminLevelRole(user.role)) && React.createElement(
+                      'input',
+                      {
+                        type: 'date',
+                        title: 'Schedule date',
+                        defaultValue: test.scheduledDate ? String(test.scheduledDate).slice(0, 10) : '',
+                        onChange: async (e) => {
+                          if (!e.target.value) return;
+                          try {
+                            await labTestService.scheduleLabTest(test.id, e.target.value);
+                          } catch (err) {
+                            setError(err.response?.data?.message || 'Failed to schedule test');
+                          }
+                        },
+                        style: { fontSize: '12px', border: '1px solid #D1D5DB', borderRadius: '4px', padding: '2px 4px' }
+                      }
                     ),
                     test.status === 'COMPLETED' && test.results && React.createElement(
                       'button',
@@ -1079,9 +1170,42 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
       'div',
       null,
       React.createElement(
-        'h3',
-        { style: { fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: '#111827' } },
-        `Test Catalog ${testCount > 0 ? `(${testCount} ${user.role === 'LAB_TECH' ? 'assigned' : ''} test${testCount !== 1 ? 's' : ''}${user.role === 'LAB_TECH' && totalCount > testCount ? ` of ${totalCount} total` : ''})` : ''}`
+        'div',
+        { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' } },
+        React.createElement(
+          'h3',
+          { style: { fontSize: '18px', fontWeight: '600', color: '#111827', margin: 0 } },
+          `Test Catalog ${testCount > 0 ? `(${testCount} ${user.role === 'LAB_TECH' ? 'assigned' : ''} test${testCount !== 1 ? 's' : ''}${user.role === 'LAB_TECH' && totalCount > testCount ? ` of ${totalCount} total` : ''})` : ''}`
+        ),
+        isAdminLevelRole(user.role) && React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => {
+              setEditingCatalogItem(null);
+              setCatalogForm({
+                testName: '',
+                description: '',
+                category: 'General',
+                price: '',
+                units: '',
+                referenceRange: '',
+                isActive: true,
+              });
+              setShowCatalogForm(true);
+            },
+            style: {
+              backgroundColor: '#0078D4',
+              color: '#FFFFFF',
+              border: '1px solid #005A9E',
+              padding: '4px 12px',
+              borderRadius: '2px',
+              fontSize: '13px',
+              cursor: 'pointer',
+            }
+          },
+          '+ Add Test'
+        )
       ),
       user.role === 'LAB_TECH' && testCount === 0 && totalCount > 0 && React.createElement(
         'div',
@@ -1210,6 +1334,52 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
                     borderRadius: '4px' 
                   } },
                   test.units
+                ),
+                test.isActive === false && React.createElement(
+                  'span',
+                  { style: { backgroundColor: '#FEE2E2', color: '#991B1B', fontSize: '12px', padding: '4px 8px', borderRadius: '4px' } },
+                  'Inactive'
+                )
+              ),
+              isAdminLevelRole(user.role) && React.createElement(
+                'div',
+                { style: { display: 'flex', gap: '8px', marginTop: '8px' } },
+                React.createElement(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: () => {
+                      setEditingCatalogItem(test);
+                      setCatalogForm({
+                        testName: test.testName || '',
+                        description: test.description || '',
+                        category: test.category || 'General',
+                        price: String(test.price ?? ''),
+                        units: test.units || '',
+                        referenceRange: test.referenceRange || '',
+                        isActive: test.isActive !== false,
+                      });
+                      setShowCatalogForm(true);
+                    },
+                    style: { fontSize: '12px', color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer' }
+                  },
+                  'Edit details'
+                ),
+                React.createElement(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: async () => {
+                      try {
+                        await labTestService.updateTestCatalogItem(test.id, { isActive: test.isActive === false });
+                        setTestCatalog(testCatalog.map(item => item.id === test.id ? { ...item, isActive: test.isActive === false } : item));
+                      } catch (err) {
+                        setError('Failed to update test status');
+                      }
+                    },
+                    style: { fontSize: '12px', color: test.isActive === false ? '#059669' : '#B45309', background: 'none', border: 'none', cursor: 'pointer' }
+                  },
+                  test.isActive === false ? 'Activate' : 'Deactivate'
                 )
               )
             )
@@ -1270,7 +1440,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
       const requestPayload = {
         technicianId: String(user.id),
         testCatalogIds: [],
-        labType: String(labTypeToUse)
+        labType: 'ALL'
       };
 
       console.log('Clearing all tests with payload:', requestPayload);
@@ -1328,6 +1498,26 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
           'My Selected Tests'
         ),
         React.createElement(
+          'div',
+          { style: { display: 'flex', gap: '8px' } },
+        totalSelectedTests > 0 && React.createElement(
+          'button',
+          {
+            onClick: _handleClearAllTests,
+            disabled: loading,
+            style: {
+              backgroundColor: '#FFFFFF',
+              color: '#B91C1C',
+              padding: '4px 12px',
+              borderRadius: '2px',
+              border: '1px solid #FECACA',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontSize: '13px',
+            }
+          },
+          'Clear all'
+        ),
+        React.createElement(
           'button',
           {
             onClick: handleOpenTechSelection,
@@ -1346,6 +1536,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
             }
           },
           totalSelectedTests > 0 ? 'Update My Tests' : 'Select My Tests'
+        )
         )
       ),
       React.createElement(
@@ -1605,6 +1796,132 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
     );
   };
 
+  const handleCatalogSubmit = async (e) => {
+    e.preventDefault();
+    const price = parseFloat(catalogForm.price);
+    if (!catalogForm.testName.trim() || isNaN(price) || price <= 0) {
+      setError('Test name and a positive price are required.');
+      return;
+    }
+    try {
+      setLoading(true);
+      const payload = {
+        testName: catalogForm.testName.trim(),
+        description: catalogForm.description.trim() || undefined,
+        category: catalogForm.category || undefined,
+        price,
+        units: catalogForm.units.trim() || undefined,
+        referenceRange: catalogForm.referenceRange.trim() || undefined,
+        isActive: catalogForm.isActive,
+      };
+      if (editingCatalogItem) {
+        await labTestService.updateTestCatalogItem(editingCatalogItem.id, payload);
+      } else {
+        await labTestService.createTestCatalogItem(payload);
+      }
+      setShowCatalogForm(false);
+      setEditingCatalogItem(null);
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to save catalog item');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderCatalogForm = () => {
+    if (!showCatalogForm) return null;
+    return React.createElement(
+      'div',
+      { style: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 } },
+      React.createElement(
+        'form',
+        { onSubmit: handleCatalogSubmit, style: { backgroundColor: '#FFFFFF', borderRadius: '8px', padding: '24px', width: '100%', maxWidth: '520px' } },
+        React.createElement('h2', { style: { fontSize: '18px', fontWeight: '600', marginBottom: '16px' } }, editingCatalogItem ? 'Edit catalog test' : 'Add catalog test'),
+        ['testName', 'description', 'category', 'price', 'units', 'referenceRange'].map((field) =>
+          React.createElement(
+            'label',
+            { key: field, style: { display: 'block', marginBottom: '10px', fontSize: '13px', fontWeight: '500' } },
+            field === 'referenceRange' ? 'Reference range' : field.replace(/([A-Z])/g, ' $1'),
+            React.createElement(field === 'description' || field === 'referenceRange' ? 'textarea' : 'input', {
+              value: catalogForm[field],
+              required: field === 'testName' || field === 'price',
+              type: field === 'price' ? 'number' : 'text',
+              min: field === 'price' ? 0 : undefined,
+              step: field === 'price' ? '0.01' : undefined,
+              onChange: (event) => setCatalogForm({ ...catalogForm, [field]: event.target.value }),
+              style: { display: 'block', width: '100%', marginTop: '4px', padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: '4px' }
+            })
+          )
+        ),
+        React.createElement(
+          'label',
+          { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '13px' } },
+          React.createElement('input', {
+            type: 'checkbox',
+            checked: catalogForm.isActive,
+            onChange: (event) => setCatalogForm({ ...catalogForm, isActive: event.target.checked })
+          }),
+          'Active and orderable'
+        ),
+        React.createElement(
+          'div',
+          { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } },
+          React.createElement('button', { type: 'button', onClick: () => setShowCatalogForm(false), style: { padding: '8px 14px', border: '1px solid #D1D5DB', borderRadius: '4px', background: '#FFF' } }, 'Cancel'),
+          React.createElement('button', { type: 'submit', disabled: loading, style: { padding: '8px 14px', border: 'none', borderRadius: '4px', background: '#2563EB', color: '#FFF' } }, loading ? 'Saving...' : 'Save')
+        )
+      )
+    );
+  };
+
+  const renderReportsTab = () => React.createElement(
+    'div',
+    { style: { backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: '12px' } },
+    React.createElement('h3', { style: { fontSize: '16px', fontWeight: '600', marginBottom: '12px' } }, 'Lab test reports'),
+    React.createElement(
+      'div',
+      { style: { display: 'flex', gap: '8px', alignItems: 'end', marginBottom: '16px', flexWrap: 'wrap' } },
+      React.createElement('label', { style: { fontSize: '13px' } }, 'From', React.createElement('input', { type: 'date', value: reportFrom, onChange: (e) => setReportFrom(e.target.value), style: { display: 'block', marginTop: 4, padding: '6px 8px', border: '1px solid #D1D5DB' } })),
+      React.createElement('label', { style: { fontSize: '13px' } }, 'To', React.createElement('input', { type: 'date', value: reportTo, onChange: (e) => setReportTo(e.target.value), style: { display: 'block', marginTop: 4, padding: '6px 8px', border: '1px solid #D1D5DB' } })),
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: async () => {
+            if (!reportFrom || !reportTo) {
+              setError('Choose a start and end date');
+              return;
+            }
+            try {
+              setLoading(true);
+              const data = await labTestService.getLabTestReport(reportFrom, reportTo);
+              setReportData(data);
+              setError('');
+            } catch (err) {
+              setError(err.response?.data?.message || 'Failed to load report');
+            } finally {
+              setLoading(false);
+            }
+          },
+          style: { padding: '8px 12px', backgroundColor: '#2563EB', color: '#FFF', border: 'none', borderRadius: '4px' }
+        },
+        'Load report'
+      )
+    ),
+    reportData?.report && React.createElement(
+      'div',
+      { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' } },
+      ['totalTests', 'completedTests', 'pendingTests', 'inProgressTests', 'cancelledTests', 'totalRevenue'].map((key) =>
+        React.createElement(
+          'div',
+          { key, style: { border: '1px solid #E5E7EB', padding: '12px', borderRadius: '6px' } },
+          React.createElement('div', { style: { fontSize: '12px', color: '#6B7280' } }, key.replace(/([A-Z])/g, ' $1')),
+          React.createElement('div', { style: { fontSize: '20px', fontWeight: '600' } }, reportData.report[key] ?? 0)
+        )
+      )
+    )
+  );
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'tests':
@@ -1615,6 +1932,8 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
         return renderMyTestsTab();
       case 'stats':
         return renderStatsTab();
+      case 'reports':
+        return renderReportsTab();
       default:
         return renderLabTestsTab();
     }
@@ -1719,15 +2038,15 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
               React.createElement('option', { value: '' }, (() => {
                 // Filter tests based on user role for the dropdown
                 const availableTests = user.role === 'LAB_TECH' 
-                  ? testCatalog.filter(test => mySelectedTests.includes(test.id))
-                  : testCatalog;
+                  ? testCatalog.filter(test => mySelectedTests.includes(test.id) && test.isActive !== false)
+                  : testCatalog.filter(test => test.isActive !== false);
                 return availableTests.length > 0 ? 'Select Test' : (user.role === 'LAB_TECH' ? 'No tests assigned' : 'Loading tests...');
               })()),
               (() => {
                 // Filter tests based on user role
                 const availableTests = user.role === 'LAB_TECH' 
-                  ? testCatalog.filter(test => mySelectedTests.includes(test.id))
-                  : testCatalog;
+                  ? testCatalog.filter(test => mySelectedTests.includes(test.id) && test.isActive !== false)
+                  : testCatalog.filter(test => test.isActive !== false);
                 return Array.isArray(availableTests) ? availableTests.map(test => 
                   React.createElement('option', { key: test.id, value: test.id }, test.testName || 'Unknown')
                 ) : null;
@@ -1967,8 +2286,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
                   
                   // If "ALL TESTS" is selected, don't filter selections
                   if (nextType === 'ALL TESTS') {
-                    // Clear selected tests when viewing all tests
-                    setSelectedTechTests([]);
+                    setSelectedTechTests(mySelectedTests.length > 0 ? [...mySelectedTests] : availableTests.map(test => test.id));
                   } else {
                     // Get tests for the selected lab type
                     const testsForType = mySelectedTestsByType[nextType] || [];
@@ -2041,7 +2359,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
             selectedLabType === 'ALL TESTS' && React.createElement(
               'div',
               { style: { marginBottom: '12px', padding: '8px', backgroundColor: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: '4px', fontSize: '13px', color: '#92400E', fontWeight: '500' } },
-              `Showing all ${filteredTests.length} test${filteredTests.length !== 1 ? 's' : ''} from database. Select a specific lab type to assign tests.`
+              `Showing all ${filteredTests.length} test${filteredTests.length !== 1 ? 's' : ''} from the catalog. Saving will assign every checked test.`
             ),
             Object.entries(testsByCategory).map(([category, tests]) => 
               React.createElement(
@@ -2291,23 +2609,20 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
               'button',
               {
                 type: 'submit',
-                disabled: loading || selectedLabType === 'ALL TESTS',
+                disabled: loading,
                 style: {
                   padding: '8px 16px',
-                  backgroundColor: selectedLabType === 'ALL TESTS' ? '#9CA3AF' : '#2563EB',
+                  backgroundColor: '#2563EB',
                   color: '#FFFFFF',
                   borderRadius: '4px',
                   border: 'none',
-                  cursor: selectedLabType === 'ALL TESTS' ? 'not-allowed' : (loading ? 'not-allowed' : 'pointer'),
+                  cursor: loading ? 'not-allowed' : 'pointer',
                   fontSize: '14px',
                   fontWeight: '500',
-                  opacity: (loading || selectedLabType === 'ALL TESTS') ? 0.6 : 1
-                },
-                title: selectedLabType === 'ALL TESTS' ? 'Select a specific lab type to assign tests' : ''
+                  opacity: loading ? 0.6 : 1
+                }
               },
-              selectedLabType === 'ALL TESTS' 
-                ? 'Select Lab Type to Assign'
-                : (loading ? 'Saving...' : (selectedTechTests.length === 0 ? 'Clear Selections' : `Update (${selectedTechTests.length} test${selectedTechTests.length !== 1 ? 's' : ''})`))
+              loading ? 'Saving...' : (selectedTechTests.length === 0 ? 'Clear Selections' : `Update (${selectedTechTests.length} test${selectedTechTests.length !== 1 ? 's' : ''})`)
             )
           )
         )
@@ -2330,9 +2645,8 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
           {
             type: 'button',
             onClick: () => {
-              setShowResultsModal(false);
-              setEditingLabTest(null);
-              setResultFormData({});
+              setShowResultForm(false);
+              resetResultForm();
             },
             style: { position: 'absolute', top: '16px', right: '16px', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'background-color 0.2s' },
             onMouseEnter: (e) => { e.currentTarget.style.backgroundColor = '#F3F4F6'; },
@@ -2581,9 +2895,13 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
                       'a',
                       {
                         href: '#',
-                        onClick: (e) => {
+                        onClick: async (e) => {
                           e.preventDefault();
-                          window.open('/api/uploads/' + editingLabTest.reportFile.split(/[\\/]/).pop(), '_blank');
+                          try {
+                            await labTestService.downloadLabTestReport(editingLabTest.id);
+                          } catch {
+                            setError('Failed to open report file');
+                          }
                         },
                         style: { color: '#3B82F6', textDecoration: 'underline', fontSize: '13px' }
                       },
@@ -2803,13 +3121,7 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
     );
   }
 
-  if (loading && labTests.length === 0) {
-    return React.createElement(
-      'div',
-      { style: { display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '32px' } },
-      React.createElement('div', { style: { width: '32px', height: '32px', border: '2px solid #E5E7EB', borderTop: '2px solid #2563EB', borderRadius: '50%', animation: 'spin 1s linear infinite' } })
-    );
-  }
+  const isInitialLoad = loading && labTests.length === 0 && testCatalog.length === 0;
 
   return React.createElement(
     'div',
@@ -2872,9 +3184,11 @@ const LabTestManagement = ({ user, isAuthenticated, onBack }: any) => {
     // Tab content
     renderTabContent(),
     // Forms
+    isInitialLoad ? React.createElement('div', { style: { padding: '12px', color: '#6B7280' } }, 'Loading lab tests...') : null,
     renderLabTestForm(),
     renderResultForm(),
-    renderTechSelectionForm()
+    renderTechSelectionForm(),
+    renderCatalogForm()
   );
 };
 

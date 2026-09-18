@@ -1,6 +1,7 @@
 import {
   computeUnitsToDispenseForLine,
   dosesPerDayFromFrequency,
+  unitsForBillLine,
 } from '../../utils/prescriptionDispenseUnits';
 
 describe('prescription dispense units', () => {
@@ -25,6 +26,13 @@ describe('prescription dispense units', () => {
         duration: 5,
       }),
     ).toBe(10);
+    expect(
+      unitsForBillLine({
+        quantity: 1,
+        frequency: 'TDS',
+        duration: 2,
+      }),
+    ).toBe(6);
   });
 
   it('rejects unrecognized text instead of silently treating it as once daily', () => {

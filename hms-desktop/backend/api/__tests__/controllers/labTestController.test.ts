@@ -9,9 +9,14 @@ const mockPrisma = {
   user: { findUnique: jest.fn() },
   consultation: { findUnique: jest.fn() },
   appointment: { findUnique: jest.fn() },
+  hospitalConfig: { findFirst: jest.fn() },
+  labTestConfig: { findFirst: jest.fn() },
+  technicianTestSelection: { findMany: jest.fn() },
   labTest: {
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
     create: jest.fn(),
+    update: jest.fn(),
   },
 };
 
@@ -36,7 +41,7 @@ jest.mock('../../utils/auditLogger', () => ({
   logAudit: (...args: unknown[]) => mockLogAudit(...args),
 }));
 
-import { createLabTest } from '../../controllers/labTestController';
+import { createLabTest, updateLabTest } from '../../controllers/labTestController';
 
 function responseMock(): Response {
   return {
@@ -50,6 +55,8 @@ describe('createLabTest OPD safeguards', () => {
     jest.clearAllMocks();
     mockPrisma.$transaction.mockImplementation(async (callback) => callback(mockPrisma));
     mockPrisma.$executeRaw.mockResolvedValue(1);
+    mockPrisma.hospitalConfig.findFirst.mockResolvedValue({ labTestsEnabled: true });
+    mockPrisma.labTestConfig.findFirst.mockResolvedValue(null);
   });
 
   it('returns the existing non-cancelled test when a held visit is retried', async () => {
@@ -95,10 +102,13 @@ describe('createLabTest OPD safeguards', () => {
     expect(mockPrisma.labTest.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          consultationId: 'consultation-1',
           patientId: 'patient-1',
           testCatalogId: 'test-1',
           status: { not: 'CANCELLED' },
+          OR: [
+            { consultationId: 'consultation-1' },
+            { appointmentId: 'appointment-1' },
+          ],
         }),
       }),
     );
@@ -129,5 +139,65 @@ describe('createLabTest OPD safeguards', () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(mockPrisma.patient.findUnique).not.toHaveBeenCalled();
     expect(mockPrisma.labTest.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects orders attributed to a non-doctor user', async () => {
+    const req = {
+      user: { id: 'admin-1', role: 'ADMIN' },
+      body: {
+        patientId: 'patient-1',
+        orderedBy: 'tech-1',
+        testCatalogId: 'test-1',
+      },
+    } as unknown as AuthRequest;
+    const res = responseMock();
+
+    mockPrisma.patient.findUnique.mockResolvedValue({ id: 'patient-1' });
+    mockPrisma.testCatalog.findUnique.mockResolvedValue({
+      id: 'test-1',
+      testName: 'CBC',
+      isActive: true,
+      category: 'General',
+    });
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'tech-1',
+      role: 'LAB_TECH',
+      isActive: true,
+    });
+
+    await createLabTest(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockPrisma.labTest.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('updateLabTest immutability', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('rejects changes to a completed lab test', async () => {
+    const req = {
+      user: { id: 'tech-1', role: 'LAB_TECH' },
+      params: { id: 'lab-1' },
+      body: { results: 'changed' },
+    } as unknown as AuthRequest;
+    const res = responseMock();
+
+    mockPrisma.labTest.findUnique.mockResolvedValue({
+      id: 'lab-1',
+      status: 'COMPLETED',
+      orderedBy: 'doctor-1',
+      testCatalogId: 'test-1',
+    });
+    mockPrisma.technicianTestSelection.findMany.mockResolvedValue([
+      { testCatalogId: 'test-1' },
+    ]);
+
+    await updateLabTest(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockPrisma.labTest.update).not.toHaveBeenCalled();
   });
 });

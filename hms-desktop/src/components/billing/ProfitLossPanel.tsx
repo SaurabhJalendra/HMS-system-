@@ -5,6 +5,8 @@ import userService from '../../lib/api/services/userService';
 import { ExpenseCategory, PaymentStatus, ProfitLossReport, User } from '../../lib/api/types';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { isAdminLevelRole } from '../../lib/utils/rolePermissions';
+import { fetchAllPages } from '../../lib/utils/fetchAllPages';
+import { toLocalYmd } from '../../lib/utils/localDate';
 
 function yyyyMm(date = new Date()) {
   const y = date.getFullYear();
@@ -16,9 +18,7 @@ function monthRange(month: string) {
   const [y, m] = month.split('-').map(Number);
   const start = new Date(y, m - 1, 1);
   const end = new Date(y, m, 0);
-  const startStr = start.toISOString().slice(0, 10);
-  const endStr = end.toISOString().slice(0, 10);
-  return { start, end, startStr, endStr };
+  return { start, end, startStr: toLocalYmd(start), endStr: toLocalYmd(end) };
 }
 
 type Props = {
@@ -30,9 +30,9 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
   const [from, setFrom] = useState<string>(() => {
     const d = new Date();
     d.setDate(1);
-    return d.toISOString().slice(0, 10);
+    return toLocalYmd(d);
   });
-  const [to, setTo] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState<string>(() => toLocalYmd());
   const [report, setReport] = useState<ProfitLossReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
@@ -47,7 +47,7 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
   const [miscCategory, setMiscCategory] = useState<ExpenseCategory>(ExpenseCategory.ELECTRICITY);
   const [miscDescription, setMiscDescription] = useState('');
   const [miscAmount, setMiscAmount] = useState('0');
-  const [miscDate, setMiscDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [miscDate, setMiscDate] = useState(() => toLocalYmd());
   const [miscStatus, setMiscStatus] = useState<PaymentStatus>(PaymentStatus.PAID);
 
   const isAdmin = isAdminLevelRole(user?.role);
@@ -69,8 +69,10 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
   const loadUsersAndSalaries = async () => {
     const { startStr, endStr } = monthRange(salaryMonth);
     try {
-      const u = await userService.getUsers({ isActive: true, page: 1, limit: 200 });
-      const users = (u.users || []).slice().sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
+      const users = (await fetchAllPages(async (page, limit) => {
+        const u = await userService.getUsers({ isActive: true, page, limit });
+        return { items: u.users || [], totalPages: u.pagination?.totalPages };
+      })).slice().sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
       setActiveUsers(users);
 
       const s = await expenseService.getExpenses({
@@ -105,6 +107,12 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
     loadUsersAndSalaries();
   }, [salaryMonth, isAdmin]);
 
+  useEffect(() => {
+    if (from && /^\d{4}-\d{2}/.test(from)) {
+      setSalaryMonth(from.slice(0, 7));
+    }
+  }, [from]);
+
   const salaryTotal = useMemo(() => {
     return Object.values(salaryMap).reduce((sum, v) => sum + (Number(v) || 0), 0);
   }, [salaryMap]);
@@ -112,19 +120,21 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
   const netMarginPct = useMemo(() => {
     const totalEarnings = report?.revenue?.total ?? 0;
     const profitOrLoss = report?.profitOrLoss ?? 0;
-    if (totalEarnings === 0) return 0;
+    if (totalEarnings === 0) return null;
     return (profitOrLoss / totalEarnings) * 100;
   }, [report?.revenue?.total, report?.profitOrLoss]);
 
-  const saveSalaries = async () => {
+  const saveSalaries = async (paymentStatus: PaymentStatus = PaymentStatus.PENDING) => {
     setSavingSalaries(true);
     setError('');
     try {
-      const items = activeUsers.map((u) => ({
-        userId: u.id,
-        amount: Number(salaryMap[u.id] || 0),
-        paymentStatus: PaymentStatus.PAID,
-      }));
+      const items = activeUsers
+        .map((u) => ({
+          userId: u.id,
+          amount: Number(salaryMap[u.id] || 0),
+          paymentStatus,
+        }))
+        .filter((item) => item.amount > 0);
       await expenseService.upsertMonthlySalaries({ month: salaryMonth, items });
       await loadReport();
     } catch (e: any) {
@@ -184,7 +194,7 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
       {/* Totals */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
         <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: 10 }}>
-          <div style={{ fontSize: 12, color: '#6B7280' }}>Total Earnings</div>
+          <div style={{ fontSize: 12, color: '#6B7280' }}>Cash in</div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>{formatCurrency(report?.revenue.total || 0)}</div>
           <div style={{ fontSize: 12, color: '#6B7280' }}>OPD: {formatCurrency(report?.revenue.opd || 0)} · IPD: {formatCurrency(report?.revenue.ipd || 0)}</div>
         </div>
@@ -202,10 +212,12 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
         </div>
         <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: 10 }}>
           <div style={{ fontSize: 12, color: '#6B7280' }}>Net Margin</div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: netMarginPct >= 0 ? '#065F46' : '#991B1B' }}>
-            {netMarginPct.toFixed(1)}%
+          <div style={{ fontSize: 18, fontWeight: 800, color: (netMarginPct ?? 0) >= 0 ? '#065F46' : '#991B1B' }}>
+            {netMarginPct == null ? '—' : `${netMarginPct.toFixed(1)}%`}
           </div>
-          <div style={{ fontSize: 12, color: '#6B7280' }}>Profit / Revenue</div>
+          <div style={{ fontSize: 12, color: '#6B7280' }}>
+            {netMarginPct == null ? 'Hidden when cash in is 0' : 'Profit / cash in'}
+          </div>
         </div>
         <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: 10 }}>
           <div style={{ fontSize: 12, color: '#6B7280' }}>Salaries (month)</div>
@@ -220,14 +232,17 @@ const ProfitLossPanel: React.FC<Props> = ({ user }) => {
           <div style={{ fontWeight: 700 }}>Salaries (Admin)</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="month" value={salaryMonth} onChange={(e) => setSalaryMonth(e.target.value)} style={{ padding: '4px 8px', border: '1px solid #C8C8C8' }} />
-            <button onClick={saveSalaries} disabled={savingSalaries} style={{ padding: '6px 10px', border: '1px solid #005A9E', backgroundColor: savingSalaries ? '#C8C8C8' : '#0078D4', color: '#FFF', cursor: savingSalaries ? 'not-allowed' : 'pointer' }}>
-              {savingSalaries ? 'Saving…' : 'Save Salaries'}
+            <button onClick={() => saveSalaries(PaymentStatus.PENDING)} disabled={savingSalaries} style={{ padding: '6px 10px', border: '1px solid #005A9E', backgroundColor: savingSalaries ? '#C8C8C8' : '#0078D4', color: '#FFF', cursor: savingSalaries ? 'not-allowed' : 'pointer' }}>
+              {savingSalaries ? 'Saving…' : 'Save as pending'}
+            </button>
+            <button onClick={() => saveSalaries(PaymentStatus.PAID)} disabled={savingSalaries} style={{ padding: '6px 10px', border: '1px solid #047857', backgroundColor: savingSalaries ? '#C8C8C8' : '#059669', color: '#FFF', cursor: savingSalaries ? 'not-allowed' : 'pointer' }}>
+              Mark month paid
             </button>
           </div>
         </div>
         <div style={{ padding: 10 }}>
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>
-            All active users are listed below. Enter salary amounts for the selected month. These are counted as expenses in P/L.
+            All active users are listed below. Enter salary amounts for the selected month. Saved rows stay pending until marked paid, so they do not reduce profit until paid. Zero amounts are not saved.
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>

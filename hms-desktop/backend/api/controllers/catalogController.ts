@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { randomUUID } from 'node:crypto';
+import { logAudit } from '../utils/auditLogger';
+import { decorateMedicinePack } from '../utils/medicinePack';
 
 const prisma = new PrismaClient();
 
@@ -189,7 +191,10 @@ export const getAllMedicines = async (req: AuthRequest, res: Response) => {
       orderBy: { name: 'asc' },
     });
 
-    res.json({ success: true, data: { medicines } });
+    res.json({
+      success: true,
+      data: { medicines: medicines.map((medicine) => decorateMedicinePack(medicine)) },
+    });
   } catch (error: any) {
     console.error('Get medicines error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch medicines' });
@@ -226,14 +231,33 @@ export const addMedicine = async (req: AuthRequest, res: Response) => {
 export const updateMedicineStock = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { stockQuantity } = req.body;
+    const stockQuantity = Number(req.body?.stockQuantity);
+    if (!Number.isInteger(stockQuantity) || stockQuantity < 0) {
+      return res.status(400).json({ success: false, message: 'stockQuantity must be a whole number of 0 or greater' });
+    }
+
+    const existing = await prisma.medicineCatalog.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Medicine not found' });
+    }
 
     const medicine = await prisma.medicineCatalog.update({
       where: { id },
       data: { stockQuantity },
     });
 
-    res.json({ success: true, data: { medicine } });
+    if (req.user?.id) {
+      await logAudit({
+        userId: req.user.id,
+        action: 'UPDATE_MEDICINE_STOCK',
+        tableName: 'medicine_catalog',
+        recordId: id,
+        oldValue: { stockQuantity: existing.stockQuantity },
+        newValue: { stockQuantity },
+      });
+    }
+
+    res.json({ success: true, data: { medicine: decorateMedicinePack(medicine) } });
   } catch (error: any) {
     console.error('Update medicine stock error:', error);
     res.status(500).json({ success: false, message: 'Failed to update medicine stock' });

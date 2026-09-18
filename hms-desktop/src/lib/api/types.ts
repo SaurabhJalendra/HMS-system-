@@ -541,6 +541,8 @@ export interface UpdateLabTestRequest {
   status?: LabTestStatus;
   results?: string;
   notes?: string;
+  scheduledDate?: string;
+  performedBy?: string;
 }
 
 export interface LabTestSearchParams {
@@ -548,6 +550,8 @@ export interface LabTestSearchParams {
   orderedBy?: string;
   status?: LabTestStatus;
   testCatalogId?: string;
+  search?: string;
+  category?: string;
   page?: number;
   limit?: number;
 }
@@ -555,6 +559,9 @@ export interface LabTestSearchParams {
 export interface CreateTestCatalogRequest {
   testName: string;
   description?: string;
+  category?: string;
+  units?: string;
+  referenceRange?: string;
   price: number;
   isActive?: boolean;
 }
@@ -562,6 +569,9 @@ export interface CreateTestCatalogRequest {
 export interface UpdateTestCatalogRequest {
   testName?: string;
   description?: string;
+  category?: string;
+  units?: string;
+  referenceRange?: string;
   price?: number;
   isActive?: boolean;
 }
@@ -590,15 +600,17 @@ export interface MedicineWithStatus extends MedicineInventory {
 
 export interface CreateMedicineRequest {
   name: string;
-  quantity: number;
-  price: number;
+  quantity?: number;
+  strips?: number;
+  tabletsPerStrip?: number;
+  price?: number;
   batchNumber?: string;
   lowStockThreshold?: number;
 }
 
 export interface UpdateMedicineRequest {
   name?: string;
-  quantity?: number;
+  tabletsPerStrip?: number;
   price?: number;
   batchNumber?: string;
   lowStockThreshold?: number;
@@ -613,7 +625,9 @@ export interface MedicineSearchParams {
 }
 
 export interface UpdateStockRequest {
-  quantity: number;
+  quantity?: number;
+  strips?: number;
+  tabletsPerStrip?: number;
   operation: 'add' | 'subtract' | 'set';
   reason?: string;
 }
@@ -713,6 +727,8 @@ export interface Bill {
   totalAmount: number;
   paymentMode: 'CASH' | 'CARD' | 'UPI' | 'NET_BANKING' | 'INSURANCE';
   paymentStatus: 'PENDING' | 'PAID' | 'PARTIAL' | 'CANCELLED';
+  paidAmount?: number | null;
+  paidAt?: string | null;
   createdAt: string;
   updatedAt: string;
   patient?: {
@@ -839,6 +855,8 @@ export interface Bill {
   totalAmount: number;
   paymentMode: PaymentMode;
   paymentStatus: PaymentStatus;
+  paidAmount?: number | null;
+  paidAt?: string | null;
   createdAt: string;
   updatedAt: string;
   patient?: Patient;

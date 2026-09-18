@@ -70,8 +70,9 @@ app.use('/api', (_req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve static files from uploads directory
-app.use('/api/uploads', express.static('uploads'));
+// Hospital logos are public branding assets. Clinical lab reports are served
+// only through authenticated lab-test download routes.
+app.use('/api/uploads/logos', express.static('uploads/logos'));
 
 // Request logging middleware (must be after body parsing)
 app.use(requestLogger);

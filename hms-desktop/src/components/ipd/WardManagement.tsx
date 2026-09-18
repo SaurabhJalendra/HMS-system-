@@ -15,6 +15,8 @@ const WardManagement = ({ onBack: _onBack, isAuthenticated }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   
   // Form states
   const [formData, setFormData] = useState({
@@ -46,14 +48,14 @@ const WardManagement = ({ onBack: _onBack, isAuthenticated }) => {
     } else {
       setError('Please login to access ward management');
     }
-  }, [isAuthenticated, searchTerm, filterType, filterStatus]);
+  }, [isAuthenticated, searchTerm, filterType, filterStatus, currentPage]);
 
   const loadWards = async () => {
     setLoading(true);
     try {
       const params = {
-        page: 1,
-        limit: 100,
+        page: currentPage,
+        limit: 20,
         ...(searchTerm && { search: searchTerm }),
         ...(filterType && { type: filterType }),
         ...(filterStatus && { isActive: filterStatus === 'active' })
@@ -78,6 +80,11 @@ const WardManagement = ({ onBack: _onBack, isAuthenticated }) => {
       
       // Force state update by creating a new array reference
       setWards([...wardsList]);
+      const nextTotalPages = Math.max(1, response?.pagination?.totalPages || response?.data?.pagination?.totalPages || 1);
+      setTotalPages(nextTotalPages);
+      if (currentPage > nextTotalPages) {
+        setCurrentPage(nextTotalPages);
+      }
       setError('');
     } catch (err) {
       if (err.response?.status === 401) {
@@ -982,6 +989,31 @@ const WardManagement = ({ onBack: _onBack, isAuthenticated }) => {
             )
           )
         )
+      )
+    ),
+    totalPages > 1 && React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8' } },
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => setCurrentPage((page) => Math.max(1, page - 1)),
+          disabled: currentPage === 1,
+          style: { padding: '6px 12px', cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }
+        },
+        'Previous'
+      ),
+      React.createElement('span', { style: { fontSize: '13px' } }, `Page ${currentPage} of ${totalPages}`),
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => setCurrentPage((page) => Math.min(totalPages, page + 1)),
+          disabled: currentPage >= totalPages,
+          style: { padding: '6px 12px', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer' }
+        },
+        'Next'
       )
     ),
 

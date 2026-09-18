@@ -39,6 +39,10 @@ export interface Medicine {
   atcCode?: string;
   price: number;
   stockQuantity: number;
+  tabletsPerStrip?: number | null;
+  strips?: number | null;
+  packDisplay?: string;
+  stockStatus?: 'OK' | 'LOW';
   lowStockThreshold: number;
   expiryDate?: string;
   isActive: boolean;

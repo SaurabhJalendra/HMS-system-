@@ -351,7 +351,8 @@ const App: React.FC = () => {
           user, 
           onNavigate: handleNavigation,
           onLogout: handleLogout,
-          currentModule: currentModule
+          currentModule: currentModule,
+          initialAction: currentAction,
         });
       case 'opdFlow':
         return React.createElement(PatientJourneyModule, {
@@ -384,7 +385,12 @@ const App: React.FC = () => {
             typeof currentAction === 'string' ? currentAction : undefined,
         });
       case 'users':
-        return React.createElement(UserManagement, { user, isAuthenticated });
+        return React.createElement(UserManagement, {
+          key: `users-${currentAction || 'default'}`,
+          user,
+          isAuthenticated,
+          initialAction: currentAction,
+        });
       case 'prescriptions':
         return React.createElement(PrescriptionManagement, {
           key: `prescriptions-${currentAction || 'default'}`,
@@ -395,9 +401,11 @@ const App: React.FC = () => {
         });
       case 'labTests':
         return React.createElement(LabTestManagement, { 
+          key: `labTests-${currentAction || 'default'}`,
           user, 
           isAuthenticated, 
-          onBack: () => handleNavigation('dashboard') 
+          onBack: () => handleNavigation('dashboard'),
+          initialAction: currentAction,
         });
       case 'medicines':
         return React.createElement(MedicineManagement, {
@@ -427,7 +435,9 @@ const App: React.FC = () => {
             user.role === 'ADMIN'
               ? currentAction === 'appUpdates'
                 ? 'updates'
-                : undefined
+                : currentAction === 'backup'
+                  ? 'backup'
+                  : undefined
               : 'updates',
         });
       default:
@@ -435,7 +445,8 @@ const App: React.FC = () => {
           user, 
           onNavigate: handleNavigation,
           onLogout: handleLogout,
-          currentModule: currentModule
+          currentModule: currentModule,
+          initialAction: currentAction,
         });
     }
   };

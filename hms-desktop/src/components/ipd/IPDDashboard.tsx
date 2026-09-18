@@ -768,7 +768,8 @@ const IPDDashboard = ({ onBack, isAuthenticated, user }) => {
                 const admissionDate = admission.admissionDate ? new Date(admission.admissionDate).toLocaleDateString() : '-';
                 const typeInfo = {
                   EMERGENCY: { icon: '🚨', label: 'Emergency' },
-                  ELECTIVE: { icon: '📅', label: 'Elective' },
+                  PLANNED: { icon: '📅', label: 'Planned' },
+                  ELECTIVE: { icon: '📅', label: 'Planned' },
                   TRANSFER: { icon: '🔄', label: 'Transfer' },
                   OBSERVATION: { icon: '👁️', label: 'Observation' },
                   SURGICAL: { icon: '⚕️', label: 'Surgical' },
