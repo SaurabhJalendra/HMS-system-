@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import consultationService from '../../../lib/api/services/consultationService';
 import labTestService from '../../../lib/api/services/labTestService';
 import type { Appointment } from '../../../lib/api/types';
-import type { TestCatalog } from '../../../lib/api/types';
+import type { LabTest, TestCatalog } from '../../../lib/api/types';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { useCriticalUpdateLock } from '../../../lib/hooks/useCriticalUpdateLock';
+import { toLocalYmd } from '../../../lib/utils/localDate';
 
 interface ConsultationFormProps {
   appointment: Appointment;
@@ -43,9 +44,15 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
   useCriticalUpdateLock(true, 'consultation');
   const [diagnosis, setDiagnosis] = useState('');
   const [notes, setNotes] = useState('');
+  const [temperature, setTemperature] = useState('');
+  const [bloodPressure, setBloodPressure] = useState('');
+  const [followUpDate, setFollowUpDate] = useState('');
   const [holdUntil, setHoldUntil] = useState(defaultHoldDatetimeLocal);
   const [activeConsultationId, setActiveConsultationId] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<TestCatalog[]>([]);
+  const [labSearch, setLabSearch] = useState('');
+  const [existingLabTests, setExistingLabTests] = useState<LabTest[]>([]);
+  const [loadingExistingLabs, setLoadingExistingLabs] = useState(false);
   const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
@@ -57,6 +64,15 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
 
   const patientName =
     (appointment as Appointment & { patient?: { name?: string } }).patient?.name ?? 'Patient';
+  const patient = appointment.patient;
+  const filteredCatalog = catalog.filter((test) => {
+    const query = labSearch.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      test.testName.toLowerCase().includes(query) ||
+      (test.category || '').toLowerCase().includes(query)
+    );
+  });
 
   const toggleTest = (id: string) => {
     setSelectedTestIds((prev) => {
@@ -89,7 +105,11 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
     setActiveConsultationId(null);
     setDiagnosis('');
     setNotes('');
+    setTemperature('');
+    setBloodPressure('');
+    setFollowUpDate('');
     setSelectedTestIds(new Set());
+    setExistingLabTests([]);
     setHoldUntil(defaultHoldDatetimeLocal());
   }, []);
 
@@ -108,6 +128,13 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
         setActiveConsultationId(consultation.id);
         setDiagnosis(consultation.diagnosis || '');
         setNotes(consultation.notes || '');
+        setTemperature(consultation.temperature != null ? String(consultation.temperature) : '');
+        setBloodPressure(consultation.bloodPressure || '');
+        setFollowUpDate(
+          consultation.followUpDate
+            ? toDatetimeLocalValue(consultation.followUpDate).slice(0, 10)
+            : '',
+        );
         if (consultation.heldUntil) {
           setHoldUntil(toDatetimeLocalValue(consultation.heldUntil));
         } else {
@@ -126,6 +153,36 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
     };
   }, [resumeConsultationId, appointment.id, resetForNewVisit]);
 
+  useEffect(() => {
+    if (!resumeConsultationId) {
+      setExistingLabTests([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingExistingLabs(true);
+    labTestService
+      .getLabTests({ patientId, page: 1, limit: 100 })
+      .then(({ labTests }) => {
+        if (cancelled) return;
+        setExistingLabTests(
+          (labTests || []).filter(
+            (test) =>
+              test.consultationId === resumeConsultationId ||
+              test.appointmentId === appointment.id,
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setError('Could not load lab orders for this consultation.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingExistingLabs(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appointment.id, patientId, resumeConsultationId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!diagnosis.trim()) {
@@ -139,6 +196,9 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
         await consultationService.updateConsultation(activeConsultationId, {
           diagnosis: diagnosis.trim(),
           notes: notes.trim() || undefined,
+          temperature: temperature ? Number(temperature) : null,
+          bloodPressure: bloodPressure.trim() || null,
+          followUpDate: followUpDate || null,
           heldUntil: null,
         });
         onSuccess(activeConsultationId);
@@ -151,6 +211,9 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
         doctorId,
         diagnosis: diagnosis.trim(),
         notes: notes.trim() || undefined,
+        temperature: temperature ? Number(temperature) : undefined,
+        bloodPressure: bloodPressure.trim() || undefined,
+        followUpDate: followUpDate || undefined,
       });
       onSuccess(consultation.id);
     } catch (err: unknown) {
@@ -160,6 +223,9 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
           await consultationService.updateConsultation(e.existingConsultationId, {
             diagnosis: diagnosis.trim(),
             notes: notes.trim() || undefined,
+            temperature: temperature ? Number(temperature) : null,
+            bloodPressure: bloodPressure.trim() || null,
+            followUpDate: followUpDate || null,
             heldUntil: null,
           });
           onSuccess(e.existingConsultationId);
@@ -190,6 +256,10 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
       setError('Invalid hold date/time.');
       return;
     }
+    if (new Date(holdUntil).getTime() <= Date.now()) {
+      setError('Hold until must be a future date and time.');
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -200,6 +270,9 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
         await consultationService.updateConsultation(cid, {
           diagnosis: diagnosis.trim(),
           notes: notes.trim() || undefined,
+          temperature: temperature ? Number(temperature) : null,
+          bloodPressure: bloodPressure.trim() || null,
+          followUpDate: followUpDate || null,
           heldUntil: heldIso,
         });
       } else {
@@ -209,6 +282,9 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
           doctorId,
           diagnosis: diagnosis.trim(),
           notes: notes.trim() || undefined,
+          temperature: temperature ? Number(temperature) : undefined,
+          bloodPressure: bloodPressure.trim() || undefined,
+          followUpDate: followUpDate || undefined,
           heldUntil: heldIso,
         });
         cid = consultation.id;
@@ -235,6 +311,9 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
           await consultationService.updateConsultation(cid, {
             diagnosis: diagnosis.trim(),
             notes: notes.trim() || undefined,
+            temperature: temperature ? Number(temperature) : null,
+            bloodPressure: bloodPressure.trim() || null,
+            followUpDate: followUpDate || null,
             heldUntil: heldIso,
           });
           setActiveConsultationId(cid);
@@ -277,6 +356,25 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
           <span style={{ marginLeft: 8, fontSize: 13, color: '#B45309' }}>— on hold / resume</span>
         )}
       </p>
+      {patient && (
+        <div style={{ marginBottom: 12, padding: 12, border: '1px solid #BFDBFE', borderRadius: 8, backgroundColor: '#EFF6FF', fontSize: 13 }}>
+          <strong>Clinical context</strong>
+          <div style={{ marginTop: 6 }}>
+            Age: {patient.age ?? '—'} · Gender: {patient.gender || '—'} · Blood group: {patient.bloodGroup || '—'} · Phone: {patient.phone || '—'}
+          </div>
+          <div style={{ marginTop: 4 }}><strong>Allergies:</strong> {patient.allergies || 'None recorded'}</div>
+          <div style={{ marginTop: 4 }}><strong>Chronic conditions:</strong> {patient.chronicConditions || 'None recorded'}</div>
+          <div style={{ marginTop: 6 }}>
+            <strong>Recent consultations:</strong>{' '}
+            {patient.consultations?.length
+              ? patient.consultations
+                  .slice(0, 3)
+                  .map((consultation) => `${consultation.diagnosis} (${toLocalYmd(consultation.consultationDate)})`)
+                  .join(' · ')
+              : 'No prior history returned'}
+          </div>
+        </div>
+      )}
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {error && <p style={{ color: '#DC2626', fontSize: 14 }}>{error}</p>}
         <div>
@@ -313,6 +411,40 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
           />
         </div>
 
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+          <label style={{ fontSize: 14, fontWeight: 500 }}>
+            Temperature (°C)
+            <input
+              type="number"
+              min="30"
+              max="45"
+              step="0.1"
+              value={temperature}
+              onChange={(event) => setTemperature(event.target.value)}
+              style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 6 }}
+            />
+          </label>
+          <label style={{ fontSize: 14, fontWeight: 500 }}>
+            Blood pressure
+            <input
+              value={bloodPressure}
+              onChange={(event) => setBloodPressure(event.target.value)}
+              placeholder="e.g. 120/80"
+              style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 6 }}
+            />
+          </label>
+          <label style={{ fontSize: 14, fontWeight: 500 }}>
+            Follow-up date
+            <input
+              type="date"
+              value={followUpDate}
+              min={toLocalYmd()}
+              onChange={(event) => setFollowUpDate(event.target.value)}
+              style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 6 }}
+            />
+          </label>
+        </div>
+
         <div
           style={{
             padding: 14,
@@ -328,6 +460,51 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
             Select tests to order now. They are linked to this visit. Use <strong>Hold consultation</strong> below to
             send the patient to the lab and return to the queue.
           </p>
+          {resumeConsultationId && (
+            <div style={{ marginBottom: 10, padding: 10, border: '1px solid #D1D5DB', borderRadius: 6, backgroundColor: '#FFF' }}>
+              <strong style={{ fontSize: 13 }}>Existing lab orders</strong>
+              {loadingExistingLabs ? (
+                <p style={{ margin: '6px 0 0', fontSize: 13 }}>Loading lab orders…</p>
+              ) : existingLabTests.length === 0 ? (
+                <p style={{ margin: '6px 0 0', fontSize: 13, color: '#6B7280' }}>No linked lab orders.</p>
+              ) : (
+                existingLabTests.map((test) => (
+                  <div key={test.id} style={{ marginTop: 6, fontSize: 13 }}>
+                    {test.testNameSnapshot} — <strong>{test.status}</strong>
+                    {test.results ? <div style={{ color: '#374151' }}>Result: {test.results}</div> : null}
+                    {test.reportFile ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          window.open(
+                            `/api/uploads/${test.reportFile!.split(/[\\/]/).pop()}`,
+                            '_blank',
+                            'noopener,noreferrer',
+                          )
+                        }
+                        style={{ marginTop: 3, padding: 0, border: 0, color: '#2563EB', background: 'transparent', textDecoration: 'underline', cursor: 'pointer', fontSize: 13 }}
+                      >
+                        View report
+                      </button>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+          <input
+            type="search"
+            value={labSearch}
+            onChange={(event) => setLabSearch(event.target.value)}
+            placeholder="Search lab tests by name or category"
+            aria-label="Search lab tests"
+            style={{ width: '100%', marginBottom: 8, padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 13 }}
+          />
+          {selectedTestIds.size > 0 && (
+            <p style={{ margin: '0 0 8px', fontSize: 13, color: '#1D4ED8' }}>
+              {selectedTestIds.size} test{selectedTestIds.size === 1 ? '' : 's'} selected
+            </p>
+          )}
           {loadingCatalog ? (
             <LoadingSpinner text="Loading test catalog…" />
           ) : (
@@ -341,10 +518,10 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
                 backgroundColor: '#FFF',
               }}
             >
-              {catalog.length === 0 ? (
+              {filteredCatalog.length === 0 ? (
                 <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>No active tests in catalog.</p>
               ) : (
-                catalog.map((t) => (
+                filteredCatalog.map((t) => (
                   <label
                     key={t.id}
                     style={{
@@ -391,6 +568,7 @@ const ConsultationForm: React.FC<ConsultationFormProps> = ({
           <input
             type="datetime-local"
             value={holdUntil}
+            min={defaultHoldDatetimeLocal()}
             onChange={(e) => setHoldUntil(e.target.value)}
             style={{
               padding: '8px 10px',

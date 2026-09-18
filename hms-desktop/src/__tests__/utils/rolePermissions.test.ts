@@ -13,6 +13,7 @@ import {
   getRoleQuickActions,
   shouldShowAvailableModules,
   canEditPrescription,
+  canMutatePatientRecord,
 } from '../../lib/utils/rolePermissions';
 import { UserRole } from '../../lib/api/types';
 
@@ -136,6 +137,20 @@ describe('Role Permissions', () => {
       expect(canEditPrescription(UserRole.ADMIN, activeOwn, 'admin-1')).toBe(true);
     });
 
+    it('hides patient edit and delete for pharmacy', () => {
+      expect(canMutatePatientRecord(UserRole.PHARMACY)).toBe(false);
+      expect(canMutatePatientRecord(UserRole.ADMIN)).toBe(true);
+      expect(canMutatePatientRecord(UserRole.RECEPTIONIST)).toBe(true);
+      expect(canMutatePatientRecord(UserRole.DOCTOR)).toBe(true);
+    });
+
+    it('sends pharmacy pending and dispense actions to prescriptions, stock alert to medicines', () => {
+      const actions = getRoleQuickActions(UserRole.PHARMACY);
+      expect(actions.find((action) => action.action === 'pendingPrescriptions')?.module).toBe('prescriptions');
+      expect(actions.find((action) => action.action === 'dispenseMedicine')?.module).toBe('prescriptions');
+      expect(actions.find((action) => action.action === 'stockAlert')?.module).toBe('medicines');
+    });
+
     it('hides Edit for receptionist, pharmacy, and other roles', () => {
       expect(canEditPrescription(UserRole.RECEPTIONIST, activeOwn, 'r1')).toBe(false);
       expect(canEditPrescription(UserRole.PHARMACY, activeOwn, 'p1')).toBe(false);
@@ -195,6 +210,18 @@ describe('Role Permissions', () => {
       const actions = getRoleQuickActions(UserRole.RECEPTIONIST);
       expect(actions.find((action) => action.name === 'Register Patient')?.module).toBe('opdFlow');
       expect(actions.find((action) => action.name === 'Book Appointment')?.module).toBe('opdFlow');
+    });
+
+    it('sends doctor pending consultations and prescription work to the OPD queue', () => {
+      const actions = getRoleQuickActions(UserRole.DOCTOR);
+      expect(actions.find((action) => action.name === 'Pending Consultations')).toMatchObject({
+        action: 'consultQueue',
+        module: 'opdFlow',
+      });
+      expect(actions.find((action) => action.name === 'Write Prescription')).toMatchObject({
+        action: 'consultQueue',
+        module: 'opdFlow',
+      });
     });
 
     it('hides available modules for lab technicians except via quick actions', () => {

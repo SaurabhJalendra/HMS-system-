@@ -2,7 +2,10 @@ import { Response } from 'express';
 import { PrismaClient, PrescriptionStatus, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
-import { computeUnitsToDispenseForLine } from '../utils/prescriptionDispenseUnits';
+import {
+  computeUnitsToDispenseForLine,
+  isSupportedPrescriptionFrequency,
+} from '../utils/prescriptionDispenseUnits';
 import { buildDispensePlan } from '../utils/prescriptionStock';
 
 const prisma = new PrismaClient();
@@ -11,7 +14,13 @@ const prisma = new PrismaClient();
 const prescriptionItemSchema = z.object({
   medicineId: z.string().min(1, 'Medicine ID is required'),
   quantity: z.number().int().positive('Quantity must be positive'),
-  frequency: z.string().min(1, 'Frequency is required'),
+  frequency: z.string()
+    .trim()
+    .min(1, 'Frequency is required')
+    .refine(
+      isSupportedPrescriptionFrequency,
+      'Unsupported frequency. Use a schedule such as OD, BD, TDS, QID, or 1-0-1.',
+    ),
   duration: z.number().int().positive('Duration must be positive'),
   instructions: z.string().optional(),
   dosage: z.string().optional(),
@@ -20,17 +29,33 @@ const prescriptionItemSchema = z.object({
   endDate: z.string().optional(),
 });
 
+const prescriptionItemsSchema = z.array(prescriptionItemSchema)
+  .min(1, 'At least one medicine item is required')
+  .superRefine((items, context) => {
+    const seen = new Set<string>();
+    items.forEach((item, index) => {
+      if (seen.has(item.medicineId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, 'medicineId'],
+          message: 'Each medicine can only be added once per prescription',
+        });
+      }
+      seen.add(item.medicineId);
+    });
+  });
+
 const prescriptionCreateSchema = z.object({
   patientId: z.string().min(1, 'Patient ID is required'),
   appointmentId: z.string().optional().transform((val) => (!val || val.trim() === '') ? undefined : val),
   consultationId: z.string().optional().transform((val) => (!val || val.trim() === '') ? undefined : val),
   notes: z.string().optional(),
-  items: z.array(prescriptionItemSchema).min(1, 'At least one medicine item is required'),
+  items: prescriptionItemsSchema,
 });
 
 const prescriptionUpdateSchema = z.object({
   notes: z.string().optional().nullable(),
-  items: z.array(prescriptionItemSchema).min(1, 'At least one medicine item is required'),
+  items: prescriptionItemsSchema,
 });
 
 const prescriptionListInclude = {
@@ -73,7 +98,7 @@ async function calculatePrescriptionTotal(
 ): Promise<{ totalAmount: number; missingMedicineId?: string }> {
   const medicineIds = [...new Set(items.map((item) => item.medicineId))];
   const catalogRows = await prisma.medicineCatalog.findMany({
-    where: { id: { in: medicineIds } },
+    where: { id: { in: medicineIds }, isActive: true },
     select: { id: true, price: true },
   });
   const priceById = new Map(catalogRows.map((row) => [row.id, Number(row.price)]));
@@ -168,79 +193,130 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Verify doctor exists
-    const doctor = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true },
-    });
+    let appointment = appointmentId
+      ? await prisma.appointment.findUnique({
+          where: { id: appointmentId },
+          select: { id: true, patientId: true, doctorId: true },
+        })
+      : null;
+    if (appointmentId && !appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
 
-    if (!doctor) {
-      console.error('Doctor not found:', userId);
-      return res.status(404).json({
+    const consultation = consultationId
+      ? await prisma.consultation.findUnique({
+          where: { id: consultationId },
+          select: { id: true, patientId: true, doctorId: true, appointmentId: true },
+        })
+      : null;
+    if (consultationId && !consultation) {
+      return res.status(404).json({ success: false, message: 'Consultation not found' });
+    }
+
+    if (consultation && appointmentId && consultation.appointmentId !== appointmentId) {
+      return res.status(400).json({
         success: false,
-        message: 'Doctor not found',
+        message: 'Consultation does not belong to appointment',
       });
     }
 
-    // If appointmentId is provided, verify it exists
-    if (appointmentId) {
-      const appointment = await prisma.appointment.findUnique({
-        where: { id: appointmentId },
-        select: { id: true },
+    if (!appointment && consultation) {
+      appointment = await prisma.appointment.findUnique({
+        where: { id: consultation.appointmentId },
+        select: { id: true, patientId: true, doctorId: true },
       });
       if (!appointment) {
-        console.error('Appointment not found:', appointmentId);
-        return res.status(404).json({
+        return res.status(400).json({
           success: false,
-          message: 'Appointment not found',
+          message: 'Consultation appointment no longer exists',
         });
       }
     }
 
-    // If consultationId is provided, verify it exists
-    if (consultationId) {
-      const consultation = await prisma.consultation.findUnique({
-        where: { id: consultationId },
-        select: { id: true },
+    if (appointment && appointment.patientId !== validatedData.patientId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Patient ID does not match appointment',
       });
-      if (!consultation) {
-        console.error('Consultation not found:', consultationId);
-        return res.status(404).json({
-          success: false,
-          message: 'Consultation not found',
-        });
-      }
     }
-
-    // Verify all medicines exist and calculate the amount for all physical
-    // units that will be handed to the patient at dispense time.
-    let totalAmount = 0;
-    for (const item of validatedData.items) {
-      const medicine = await prisma.medicineCatalog.findUnique({
-        where: { id: item.medicineId },
-        select: { id: true, price: true },
+    if (consultation && consultation.patientId !== validatedData.patientId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Patient ID does not match consultation',
       });
-      if (!medicine) {
-        console.error('Medicine not found:', item.medicineId);
-        return res.status(404).json({
+    }
+    if (appointment && consultation && appointment.doctorId !== consultation.doctorId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Consultation doctor does not match appointment doctor',
+      });
+    }
+
+    const treatingDoctorId =
+      consultation?.doctorId || appointment?.doctorId || userId;
+    if (req.user?.role === UserRole.DOCTOR && treatingDoctorId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Doctors can only prescribe for their own appointments',
+      });
+    }
+
+    const doctor = await prisma.user.findUnique({
+      where: { id: treatingDoctorId },
+      select: { id: true },
+    });
+    if (!doctor) {
+      return res.status(404).json({ success: false, message: 'Doctor not found' });
+    }
+
+    const effectiveAppointmentId = appointment?.id || null;
+    const duplicateLinks = [
+      ...(effectiveAppointmentId
+        ? [
+            { appointmentId: effectiveAppointmentId },
+            { consultation: { appointmentId: effectiveAppointmentId } },
+          ]
+        : []),
+      ...(consultationId ? [{ consultationId }] : []),
+    ];
+    if (duplicateLinks.length > 0) {
+      const existingPrescription = await prisma.prescription.findFirst({
+        where: {
+          status: { not: PrescriptionStatus.CANCELLED },
+          OR: duplicateLinks,
+        },
+        select: {
+          id: true,
+          prescriptionNumber: true,
+          appointmentId: true,
+          consultationId: true,
+        },
+      });
+      if (existingPrescription) {
+        return res.status(409).json({
           success: false,
-          message: `Medicine not found: ${item.medicineId}`,
+          message: `A prescription already exists for this visit (${existingPrescription.prescriptionNumber})`,
+          data: { existingPrescriptionId: existingPrescription.id },
         });
       }
-      totalAmount += Number(medicine.price) * computeUnitsToDispenseForLine(item);
     }
-    totalAmount = roundMoney(totalAmount);
-    console.log('Calculated total amount:', totalAmount);
 
-    // Generate prescription number
+    const { totalAmount, missingMedicineId } =
+      await calculatePrescriptionTotal(validatedData.items);
+    if (missingMedicineId) {
+      return res.status(404).json({
+        success: false,
+        message: `Medicine is missing or inactive: ${missingMedicineId}`,
+      });
+    }
+
     const prescriptionNumber = await generatePrescriptionNumber();
-    console.log('Generated prescription number:', prescriptionNumber);
 
     // Prepare data object for Prisma
     // For optional fields, Prisma accepts null or undefined
     const prescriptionData: any = {
       patientId: validatedData.patientId,
-      doctorId: userId,
+      doctorId: treatingDoctorId,
       prescriptionNumber,
       notes: validatedData.notes || null,
       totalAmount,
@@ -261,8 +337,8 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
     };
 
     // Only add optional foreign keys if they have values
-    if (appointmentId) {
-      prescriptionData.appointmentId = appointmentId;
+    if (effectiveAppointmentId) {
+      prescriptionData.appointmentId = effectiveAppointmentId;
     }
     if (consultationId) {
       prescriptionData.consultationId = consultationId;
@@ -287,42 +363,68 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Create prescription
-    const prescription = await prisma.prescription.create({
-      data: prescriptionData,
-      include: {
-        patient: {
-          select: {
-            id: true,
-            name: true,
-            age: true,
-            dateOfBirth: true,
-            gender: true,
+    const prescription = await prisma.$transaction(async (tx) => {
+      if (duplicateLinks.length > 0) {
+        const visitKey = consultationId || effectiveAppointmentId!;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`opd-prescription:${visitKey}`}))`;
+        const duplicate = await tx.prescription.findFirst({
+          where: {
+            status: { not: PrescriptionStatus.CANCELLED },
+            OR: duplicateLinks,
           },
-        },
-        doctor: {
-          select: {
-            id: true,
-            fullName: true,
-            role: true,
-          },
-        },
-        prescriptionItems: {
-          include: {
-            medicine: {
-              select: {
-                id: true,
-                name: true,
-                genericName: true,
-                manufacturer: true,
-                price: true,
-                category: true,
-              },
+          select: { id: true, prescriptionNumber: true },
+        });
+        if (duplicate) {
+          const duplicateError = new Error('DUPLICATE_VISIT_PRESCRIPTION');
+          (duplicateError as Error & { prescription?: typeof duplicate }).prescription = duplicate;
+          throw duplicateError;
+        }
+      }
+
+      const created = await tx.prescription.create({
+        data: prescriptionData,
+        include: {
+          patient: {
+            select: {
+              id: true,
+              name: true,
+              age: true,
+              dateOfBirth: true,
+              gender: true,
             },
           },
-          orderBy: { rowOrder: 'asc' },
+          doctor: {
+            select: {
+              id: true,
+              fullName: true,
+              role: true,
+            },
+          },
+          prescriptionItems: {
+            include: {
+              medicine: {
+                select: {
+                  id: true,
+                  name: true,
+                  genericName: true,
+                  manufacturer: true,
+                  price: true,
+                  category: true,
+                },
+              },
+            },
+            orderBy: { rowOrder: 'asc' },
+          },
         },
-      },
+      });
+
+      if (effectiveAppointmentId) {
+        await tx.appointment.update({
+          where: { id: effectiveAppointmentId },
+          data: { status: 'COMPLETED' },
+        });
+      }
+      return created;
     });
 
     console.log('Prescription created successfully:', prescription.id);
@@ -366,6 +468,16 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
         success: false,
         message: 'Validation error',
         errors: error.issues,
+      });
+    }
+    if (error?.message === 'DUPLICATE_VISIT_PRESCRIPTION') {
+      const duplicate = error?.prescription;
+      return res.status(409).json({
+        success: false,
+        message: duplicate?.prescriptionNumber
+          ? `A prescription already exists for this visit (${duplicate.prescriptionNumber})`
+          : 'A prescription already exists for this visit',
+        data: duplicate?.id ? { existingPrescriptionId: duplicate.id } : undefined,
       });
     }
     
@@ -532,6 +644,22 @@ export const getPrescriptionById = async (req: AuthRequest, res: Response) => {
             phone: true,
             address: true,
             bloodGroup: true,
+            consultations: {
+              orderBy: { consultationDate: 'desc' },
+              take: 11,
+              select: {
+                id: true,
+                diagnosis: true,
+                notes: true,
+                consultationDate: true,
+                createdAt: true,
+                doctor: {
+                  select: {
+                    fullName: true,
+                  },
+                },
+              },
+            },
           },
         },
         doctor: {

@@ -207,15 +207,15 @@ const ImportCatalogWizard = ({ onBack, onSuccess, user, isAuthenticated }) => {
               { className: 'text-sm text-blue-700' },
               React.createElement('p', { className: 'mb-2 font-medium' }, 'Required Excel columns (they may appear in any order):'),
               React.createElement('ul', { className: 'list-disc list-inside ml-4' },
-                React.createElement('li', null, 'Medicine Name (required)'),
-                React.createElement('li', null, 'Generic Name (required)'),
-                React.createElement('li', null, 'Manufacturer (required)'),
-                React.createElement('li', null, 'Category (required)'),
-                React.createElement('li', null, 'Price (required)'),
-                React.createElement('li', null, 'Stock Quantity (required)'),
-                React.createElement('li', null, 'Low Stock Threshold (required)')
+                React.createElement('li', null, 'Item Name (required)'),
+                React.createElement('li', null, 'Current Quantity (required; may be 0)'),
+                React.createElement('li', null, 'Batch Number (required)')
               ),
-              React.createElement('p', { className: 'mt-2' }, 'Optional columns: ATC Code, Therapeutic Class, Expiry Date. Values are mapped by column header, not column position.')
+              React.createElement(
+                'p',
+                { className: 'mt-2' },
+                'Optional columns: Generic Name, Manufacturer, Category, Price, Low Stock Threshold, ATC Code, Therapeutic Class, and Expiry Date. Values are mapped by column header, not column position.'
+              )
             )
           ),
 

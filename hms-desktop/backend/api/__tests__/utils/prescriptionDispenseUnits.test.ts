@@ -10,6 +10,9 @@ describe('prescription dispense units', () => {
     ['BD', 2],
     ['TDS', 3],
     ['QID', 4],
+    ['twice daily', 2],
+    ['3 times per day', 3],
+    ['every 8 hours', 3],
   ])('parses %s as %i dose(s) per day', (frequency, expected) => {
     expect(dosesPerDayFromFrequency(frequency)).toBe(expected);
   });
@@ -22,5 +25,11 @@ describe('prescription dispense units', () => {
         duration: 5,
       }),
     ).toBe(10);
+  });
+
+  it('rejects unrecognized text instead of silently treating it as once daily', () => {
+    expect(() => dosesPerDayFromFrequency('when needed maybe')).toThrow(
+      'Unsupported prescription frequency',
+    );
   });
 });

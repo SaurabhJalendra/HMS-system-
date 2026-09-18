@@ -58,7 +58,9 @@ const MedicineSearchSelect: React.FC<MedicineSearchSelectProps> = ({
 
   useEffect(() => {
     const el = listRef.current?.querySelector(`[data-index="${highlight}"]`);
-    el?.scrollIntoView({ block: 'nearest' });
+    if (el && 'scrollIntoView' in el) {
+      el.scrollIntoView({ block: 'nearest' });
+    }
   }, [highlight, filtered.length, open]);
 
   const close = useCallback(() => {
@@ -85,7 +87,7 @@ const MedicineSearchSelect: React.FC<MedicineSearchSelectProps> = ({
       blurTimer.current = null;
     }
     setOpen(true);
-    setQuery(selected ? `${selected.name}${selected.code ? ` ${selected.code}` : ''}` : '');
+    setQuery(selected?.name ?? '');
   };
 
   const onInputBlur = () => {
@@ -97,6 +99,7 @@ const MedicineSearchSelect: React.FC<MedicineSearchSelectProps> = ({
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!open && (e.key === 'ArrowDown' || e.key === 'Enter')) {
+      e.preventDefault();
       setOpen(true);
       setQuery(selected ? selected.name : '');
       return;
@@ -132,9 +135,14 @@ const MedicineSearchSelect: React.FC<MedicineSearchSelectProps> = ({
       </label>
       <input
         type="text"
+        aria-label="Medicine — search by name, code, or generic"
         value={inputDisplay}
         onChange={(e) => {
-          setQuery(e.target.value);
+          const nextQuery = e.target.value;
+          if (valueId) {
+            onChange('', '');
+          }
+          setQuery(nextQuery);
           setOpen(true);
         }}
         onFocus={onInputFocus}

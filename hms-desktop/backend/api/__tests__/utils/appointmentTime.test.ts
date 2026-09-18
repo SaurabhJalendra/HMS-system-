@@ -1,6 +1,17 @@
-import { nowInTimeZone, parseSlotMinutes, toYmd } from '../../utils/appointmentTime';
+import {
+  dayBoundsInTimeZone,
+  nowInTimeZone,
+  parseSlotMinutes,
+  toYmd,
+} from '../../utils/appointmentTime';
 
 describe('appointmentTime', () => {
+  it('builds UTC bounds for an Asia/Kolkata clinic day', () => {
+    const bounds = dayBoundsInTimeZone('2026-09-17', 'Asia/Kolkata');
+    expect(bounds.start.toISOString()).toBe('2026-09-16T18:30:00.000Z');
+    expect(bounds.end.toISOString()).toBe('2026-09-17T18:30:00.000Z');
+  });
+
   describe('parseSlotMinutes', () => {
     it('parses 24-hour slots', () => {
       expect(parseSlotMinutes('09:30')).toBe(570);

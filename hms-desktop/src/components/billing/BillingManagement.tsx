@@ -21,9 +21,11 @@ const PATIENT_SEARCH_DEBOUNCE_MS = 250;
 function PatientBillPicker({
   selectedPatientId,
   onSelect,
+  autoFocus = false,
 }: {
   selectedPatientId: string;
   onSelect: (patient: Patient | null) => void;
+  autoFocus?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<Patient[]>([]);
@@ -109,6 +111,7 @@ function PatientBillPicker({
         placeholder="Search name or phone"
         aria-label="Search patient by name or phone"
         autoComplete="off"
+        autoFocus={autoFocus}
         style={{
           width: '100%',
           padding: '4px 8px',
@@ -190,7 +193,7 @@ function PatientBillPicker({
   );
 }
 
-const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; onBack?: () => void }) => {
+const BillingManagement = ({ user, initialAction }: { user?: any; isAuthenticated?: boolean; onBack?: () => void; initialAction?: string | null }) => {
   const { formatCurrency, config } = useHospitalConfig();
   const [selectedPatientId, setSelectedPatientId] = useState('');
   /** Kept alongside the id because the invoice needs the patient's name, address and phone. */
@@ -886,6 +889,7 @@ const BillingManagement = ({ user }: { user?: any; isAuthenticated?: boolean; on
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Patient name</label>
               <PatientBillPicker
                 selectedPatientId={selectedPatientId}
+                autoFocus={initialAction === 'generateBill'}
                 onSelect={(patient) => {
                   setSelectedPatient(patient);
                   setSelectedPatientId(patient?.id || '');

@@ -70,6 +70,7 @@ const medicineUpdateSchema = z.preprocess(
 
 const medicineSearchSchema = z.object({
   search: z.string().optional(),
+  category: z.string().trim().max(100, 'Category too long').optional(),
   lowStock: z.string().transform(val => val === 'true').optional(),
   page: z.string().transform(val => parseInt(val) || 1).optional(),
   limit: z.string().transform(val => parseInt(val) || 20).optional(),
@@ -121,6 +122,7 @@ export const createMedicine = async (req: AuthRequest, res: Response) => {
         atcCode: validatedData.atcCode || null,
         price: validatedData.price,
         stockQuantity: validatedData.quantity ?? 0,
+        batchNumber: validatedData.batchNumber?.trim() || null,
         lowStockThreshold: validatedData.lowStockThreshold ?? 10,
         expiryDate: validatedData.expiryDate || null,
         isActive: true,
@@ -161,7 +163,7 @@ export const createMedicine = async (req: AuthRequest, res: Response) => {
 // Get all medicines with search and pagination
 export const getMedicines = async (req: AuthRequest, res: Response) => {
   try {
-    const { search, lowStock, page = 1, limit = 20 } = medicineSearchSchema.parse(req.query);
+    const { search, category, lowStock, page = 1, limit = 20 } = medicineSearchSchema.parse(req.query);
 
     const skip = (page - 1) * limit;
 
@@ -176,6 +178,10 @@ export const getMedicines = async (req: AuthRequest, res: Response) => {
         { genericName: { contains: search, mode: 'insensitive' } },
         { code: { contains: search, mode: 'insensitive' } },
       ];
+    }
+
+    if (category) {
+      where.category = { equals: category, mode: 'insensitive' };
     }
 
     // Get all medicines first (needed for lowStock filtering)
@@ -345,6 +351,9 @@ export const updateMedicine = async (req: AuthRequest, res: Response) => {
     if (validatedData.code !== undefined) updateData.code = validatedData.code;
     if (validatedData.price !== undefined) updateData.price = validatedData.price;
     if (validatedData.quantity !== undefined) updateData.stockQuantity = validatedData.quantity;
+    if (validatedData.batchNumber !== undefined) {
+      updateData.batchNumber = validatedData.batchNumber.trim() || null;
+    }
     if (validatedData.lowStockThreshold !== undefined) updateData.lowStockThreshold = validatedData.lowStockThreshold;
     if (validatedData.expiryDate !== undefined) updateData.expiryDate = validatedData.expiryDate;
 
@@ -1031,9 +1040,17 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
     for (let i = 0; i < parsedMedicines.length; i++) {
       const medicineData = parsedMedicines[i];
       try {
-        // Validate required fields
-        if (!medicineData.name || medicineData.name.trim().length === 0) {
-          errors.push(`Row ${i + 2}: Skipped - Missing medicine name`);
+        // The import contract intentionally has only three mandatory fields.
+        if (!medicineData.name?.trim()) {
+          errors.push(`Row ${i + 2}: Skipped - Missing item name`);
+          continue;
+        }
+        if (!Number.isInteger(medicineData.stockQuantity) || medicineData.stockQuantity < 0) {
+          errors.push(`Row ${i + 2}: Skipped - Current quantity must be a whole number (0 or greater)`);
+          continue;
+        }
+        if (!medicineData.batchNumber?.trim()) {
+          errors.push(`Row ${i + 2}: Skipped - Missing batch number`);
           continue;
         }
 
@@ -1066,6 +1083,7 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
           // Build update data object - REPLACE all fields with new values from import
           const updateData: any = {
             name: medicineData.name.trim(), // Always update name (required field)
+            batchNumber: medicineData.batchNumber.trim(),
             hospitalId: hospitalId, // Always include hospitalId
             isActive: true, // Always set to active when importing
           };
@@ -1194,6 +1212,7 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
           const createData = {
             code: code,
             name: medicineData.name.trim(),
+            batchNumber: medicineData.batchNumber.trim(),
             genericName: medicineData.genericName,
             manufacturer: medicineData.manufacturer,
             category: medicineData.category || 'General',

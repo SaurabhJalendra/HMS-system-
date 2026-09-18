@@ -6,6 +6,7 @@ import labTestService from '../api/services/labTestService';
 import prescriptionService from '../api/services/prescriptionService';
 import catalogService from '../api/services/catalogService';
 import { LabTestStatus, type Appointment } from '../api/types';
+import { toLocalYmd } from './localDate';
 
 function startOfToday(): Date {
   const d = new Date();
@@ -19,7 +20,7 @@ function isAppointmentActiveForDay(a: Appointment): boolean {
 
 /** Doctor dashboard — scoped to logged-in doctor */
 export async function loadDoctorDashboardData(doctorId: string): Promise<Record<string, unknown>> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = toLocalYmd();
 
   const [aptsRes, consultRes] = await Promise.allSettled([
     appointmentService.getAppointments({ doctorId, date: today, limit: 100 }),
@@ -80,22 +81,23 @@ function mapAppointmentToListRow(a: Appointment) {
 
 /** Receptionist — hospital-wide today + billing */
 export async function loadReceptionistDashboardData(): Promise<Record<string, unknown>> {
-  const today = new Date().toISOString().split('T')[0];
-  const dayStart = startOfToday();
+  const today = toLocalYmd();
 
   const [aptsRes, patientsRes, billingRes] = await Promise.allSettled([
     appointmentService.getAppointments({ date: today, limit: 200 }),
-    patientService.getPatients({ page: 1, limit: 400 }),
+    patientService.getPatients({ createdFrom: today, page: 1, limit: 1 }),
     billingService.getBillingStats(30),
   ]);
 
   const appointments = aptsRes.status === 'fulfilled' ? aptsRes.value.appointments || [] : [];
-  const patients = patientsRes.status === 'fulfilled' ? patientsRes.value.patients || [] : [];
   const billing = billingRes.status === 'fulfilled' ? billingRes.value : null;
 
   const todayAppointments = appointments.filter(isAppointmentActiveForDay).length;
 
-  const newPatients = patients.filter((p) => p.createdAt && new Date(p.createdAt) >= dayStart).length;
+  const newPatients =
+    patientsRes.status === 'fulfilled'
+      ? patientsRes.value.pagination?.totalItems || 0
+      : 0;
 
   const pendingBills = billing?.pendingBills ?? 0;
   const paidBills = billing?.paidBills ?? 0;

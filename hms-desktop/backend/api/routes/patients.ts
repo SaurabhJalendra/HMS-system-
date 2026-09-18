@@ -84,11 +84,11 @@ router.post('/', requirePatientCreateAccess, createPatient);
 // @route   PUT /api/patients/:id
 // @desc    Update patient
 // @access  Private (Admin, Receptionist)
-router.put('/:id', requireAdmin, updatePatient);
+router.put('/:id', requirePatientCreateAccess, updatePatient);
 
 // @route   DELETE /api/patients/:id
 // @desc    Delete patient
-// @access  Private (Admin, Receptionist)
+// @access  Private (Admin only)
 router.delete('/:id', requireAdmin, deletePatient);
 
 export { router as patientRoutes };

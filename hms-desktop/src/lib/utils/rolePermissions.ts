@@ -110,6 +110,10 @@ export const roleUsesConsultationFee = (userRole) => {
 export const isAdminLevelRole = (userRole: UserRole | string | undefined): boolean =>
   userRole === UserRole.ADMIN || userRole === UserRole.SUBADMIN;
 
+/** Pharmacy may view patients but not edit or delete them. */
+export const canMutatePatientRecord = (userRole: UserRole | string | undefined): boolean =>
+  Boolean(userRole) && userRole !== UserRole.PHARMACY;
+
 /** Doctors and admins may edit ACTIVE prescriptions. Doctors may edit only their own. */
 export const canEditPrescription = (
   userRole: UserRole | string | undefined,
@@ -202,8 +206,8 @@ export const getRoleQuickActions = (userRole) => {
     ],
     [UserRole.DOCTOR]: [
       { name: 'Today\'s Appointments', icon: '📅', action: 'todayAppointments', module: 'appointments' },
-      { name: 'Pending Consultations', icon: '🩺', action: 'pendingConsultations', module: 'consultations' },
-      { name: 'Write Prescription', icon: '💊', action: 'newPrescription', module: 'prescriptions' },
+      { name: 'Pending Consultations', icon: '🩺', action: 'consultQueue', module: 'opdFlow' },
+      { name: 'Write Prescription', icon: '💊', action: 'consultQueue', module: 'opdFlow' },
       appUpdatesAction,
     ],
     [UserRole.RECEPTIONIST]: [
@@ -221,7 +225,7 @@ export const getRoleQuickActions = (userRole) => {
     ],
     [UserRole.PHARMACY]: [
       { name: 'Pending Prescriptions', icon: '💊', action: 'pendingPrescriptions', module: 'prescriptions' },
-      { name: 'Dispense Medicine', icon: '💉', action: 'dispenseMedicine', module: 'medicines' },
+      { name: 'Dispense Medicine', icon: '💉', action: 'dispenseMedicine', module: 'prescriptions' },
       { name: 'Stock Alert', icon: '⚠️', action: 'stockAlert', module: 'medicines' },
       appUpdatesAction,
     ],

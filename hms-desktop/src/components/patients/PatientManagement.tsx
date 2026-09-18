@@ -1,14 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
+import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
 import patientService from '../../lib/api/services/patientService';
 import catalogService from '../../lib/api/services/catalogService';
 import LoadingSpinner from '../common/LoadingSpinner';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
 import { BLOOD_GROUP_OPTIONS, bloodGroupSelectValue, digitsOnly } from '../../lib/constants/patientFields';
+import {
+  canMutatePatientRecord,
+  isAdminLevelRole,
+} from '../../lib/utils/rolePermissions';
 
 const PatientManagement = ({ user }: any = {}) => {
-  const isLabTech = user?.role === 'LAB_TECH';
+  const canMutatePatients = canMutatePatientRecord(user?.role);
+  const canEditPatients = canMutatePatients && user?.role !== 'LAB_TECH';
+  const canDeletePatients = isAdminLevelRole(user?.role);
+  const isViewOnly = !canMutatePatients || user?.role === 'LAB_TECH';
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -25,6 +33,11 @@ const PatientManagement = ({ user }: any = {}) => {
   const [patientHistory, setPatientHistory] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(searchTerm, 350);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const patientListRequestRef = useRef(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Catalog data for dropdowns
@@ -56,9 +69,17 @@ const PatientManagement = ({ user }: any = {}) => {
   });
   
   useEffect(() => {
-    loadPatients();
     loadCatalogs();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setAppliedSearch(debouncedSearch);
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    loadPatients(appliedSearch);
+  }, [appliedSearch, currentPage]);
   
   const loadCatalogs = async () => {
     try {
@@ -85,45 +106,47 @@ const PatientManagement = ({ user }: any = {}) => {
     }
   };
 
-  const loadPatients = async () => {
+  const loadPatients = async (term = appliedSearch) => {
+    const requestId = ++patientListRequestRef.current;
     try {
       setLoading(true);
       setError('');
-      const response = await patientService.getPatients();
+      const trimmed = String(term || '').trim();
+      const response = await patientService.getPatients({
+        search: trimmed || undefined,
+        page: currentPage,
+        limit: 20,
+      });
+      if (requestId !== patientListRequestRef.current) return;
       if (response.patients) {
+        const nextTotalPages = Math.max(1, response.pagination?.totalPages || 1);
+        if (currentPage > nextTotalPages) {
+          setCurrentPage(nextTotalPages);
+          return;
+        }
         setPatients(response.patients || []);
-        console.log('✅ Loaded patients:', response.patients.length);
+        setTotalPages(nextTotalPages);
       } else {
         setError('Failed to load patients');
       }
     } catch (err) {
+      if (requestId !== patientListRequestRef.current) return;
       console.error('Load patients error:', err);
       setError('Error loading patients: ' + (err.response?.data?.message || err.message));
     } finally {
-      setLoading(false);
+      if (requestId === patientListRequestRef.current) {
+        setLoading(false);
+      }
     }
   };
 
-  const handleSearch = async () => {
-    if (!searchTerm.trim()) {
-      loadPatients();
+  const runSearchNow = () => {
+    if (currentPage === 1 && appliedSearch === searchTerm) {
+      loadPatients(searchTerm);
       return;
     }
-
-    try {
-      setLoading(true);
-      const response = await patientService.searchPatients(searchTerm);
-      if (response.patients) {
-        setPatients(response.patients || []);
-      } else {
-        setError('Search failed');
-      }
-    } catch (err) {
-      console.error('Search error:', err);
-      setError('Search error: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setLoading(false);
-    }
+    setCurrentPage(1);
+    setAppliedSearch(searchTerm);
   };
 
   const handleInputChange = (e) => {
@@ -251,7 +274,7 @@ const PatientManagement = ({ user }: any = {}) => {
       setSelectedAllergies([]);
       setConditionSearchTerm('');
       setAllergySearchTerm('');
-      loadPatients(); // Reload the list
+      loadPatients(appliedSearch);
       
       // Clear success message after 3 seconds
       setTimeout(() => setSuccess(''), 3000);
@@ -268,15 +291,22 @@ const PatientManagement = ({ user }: any = {}) => {
       setLoadingHistory(true);
       setError('');
       const patientData = await patientService.getPatientById(patient.id);
-      
-      // Load chronic conditions and allergies
-      const [chronicConditionsResponse, allergiesResponse] = await Promise.all([
+
+      const [chronicConditionsResult, allergiesResult] = await Promise.allSettled([
         catalogService.getPatientChronicConditions(patient.id),
         catalogService.getPatientAllergies(patient.id)
       ]);
-      setPatientChronicConditions(chronicConditionsResponse.conditions || []);
-      setPatientAllergies(allergiesResponse.allergies || []);
-      
+      setPatientChronicConditions(
+        chronicConditionsResult.status === 'fulfilled'
+          ? chronicConditionsResult.value.conditions || []
+          : []
+      );
+      setPatientAllergies(
+        allergiesResult.status === 'fulfilled'
+          ? allergiesResult.value.allergies || []
+          : []
+      );
+
       setSelectedPatient(patientData);
       setPatientHistory({
         appointments: patientData.appointments || [],
@@ -354,7 +384,7 @@ const PatientManagement = ({ user }: any = {}) => {
       // Force reload patients list after a short delay to ensure backend has processed
       setTimeout(() => {
         console.log('🔄 Reloading patients list after deletion...');
-        loadPatients();
+        loadPatients(appliedSearch);
       }, 500);
       
       // Clear success message after 3 seconds
@@ -537,19 +567,25 @@ const PatientManagement = ({ user }: any = {}) => {
         },
         'New patient registration is done in ',
         React.createElement('strong', null, 'OPD Flow'),
-        isLabTech
+        isViewOnly
           ? '. Here you can search and view existing patients.'
           : ' (Register & schedule). Here you can search, view, and edit existing patients.'
       ),
 
       // Search Bar
       React.createElement(
-        'div',
-        { className: 'flex space-x-4 mb-6' },
+        'form',
+        {
+          className: 'flex space-x-4 mb-6',
+          onSubmit: (e) => {
+            e.preventDefault();
+            runSearchNow();
+          },
+        },
         React.createElement(
           'input',
           {
-            type: 'text',
+            type: 'search',
             placeholder: 'Search patients...',
             value: searchTerm,
             onChange: (e) => setSearchTerm(e.target.value),
@@ -559,7 +595,7 @@ const PatientManagement = ({ user }: any = {}) => {
         React.createElement(
           'button',
           {
-            onClick: handleSearch,
+            type: 'submit',
             className: 'bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500'
           },
           'Search'
@@ -567,7 +603,8 @@ const PatientManagement = ({ user }: any = {}) => {
         React.createElement(
           'button',
           {
-            onClick: loadPatients,
+            type: 'button',
+            onClick: () => loadPatients(appliedSearch),
             className: 'bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500'
           },
           'Refresh'
@@ -617,7 +654,7 @@ const PatientManagement = ({ user }: any = {}) => {
               React.createElement(
                 'td',
                 { colSpan: 7, className: 'px-6 py-4 text-center text-gray-500' },
-                loading ? 'Loading...' : 'No patients found. Click "Add Patient" to create your first patient.'
+                loading ? 'Loading...' : 'No patients found.'
               )
             ) : patients.map((patient, index) => React.createElement(
               'tr',
@@ -664,7 +701,7 @@ const PatientManagement = ({ user }: any = {}) => {
                   },
                   'View'
                 ),
-                !isLabTech && React.createElement(
+                canEditPatients && React.createElement(
                   'button',
                   {
                     onClick: () => handleEdit(patient),
@@ -673,7 +710,7 @@ const PatientManagement = ({ user }: any = {}) => {
                   },
                   'Edit'
                 ),
-                React.createElement(
+                canDeletePatients && React.createElement(
                   'button',
                   {
                     onClick: () => openDeleteConfirm(patient),
@@ -685,6 +722,35 @@ const PatientManagement = ({ user }: any = {}) => {
               )
             ))
           )
+        )
+      ),
+      totalPages > 1 && React.createElement(
+        'div',
+        { className: 'mt-4 flex items-center justify-between border-t border-gray-200 pt-4' },
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => setCurrentPage((page) => Math.max(1, page - 1)),
+            disabled: currentPage === 1,
+            className: 'px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+          },
+          'Previous'
+        ),
+        React.createElement(
+          'span',
+          { className: 'text-sm text-gray-700' },
+          `Page ${currentPage} of ${totalPages}`
+        ),
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => setCurrentPage((page) => Math.min(totalPages, page + 1)),
+            disabled: currentPage >= totalPages,
+            className: 'px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+          },
+          'Next'
         )
       ),
 

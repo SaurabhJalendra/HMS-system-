@@ -317,6 +317,15 @@ export interface Patient {
   emergencyContactPhone?: string;
   /** Free text: name of person who referred this patient */
   referredBy?: string | null;
+  /** Limited history returned with a prescription for printing. */
+  consultations?: Array<{
+    id: string;
+    diagnosis: string;
+    notes?: string | null;
+    consultationDate: string;
+    createdAt: string;
+    doctor?: { fullName: string };
+  }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -489,6 +498,9 @@ export interface TestCatalog {
   id: string;
   testName: string;
   description?: string;
+  category?: string;
+  units?: string;
+  referenceRange?: string;
   price: number;
   isActive: boolean;
   createdAt: string;
@@ -504,6 +516,8 @@ export interface LabTest {
   priceSnapshot: number;
   status: LabTestStatus;
   results?: string;
+  reportFile?: string;
+  notes?: string;
   createdAt: string;
   completedAt?: string;
   updatedAt: string;
@@ -578,6 +592,7 @@ export interface CreateMedicineRequest {
   name: string;
   quantity: number;
   price: number;
+  batchNumber?: string;
   lowStockThreshold?: number;
 }
 
@@ -585,11 +600,13 @@ export interface UpdateMedicineRequest {
   name?: string;
   quantity?: number;
   price?: number;
+  batchNumber?: string;
   lowStockThreshold?: number;
 }
 
 export interface MedicineSearchParams {
   search?: string;
+  category?: string;
   lowStock?: boolean;
   page?: number;
   limit?: number;

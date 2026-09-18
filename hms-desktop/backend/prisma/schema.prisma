@@ -159,6 +159,7 @@ model MedicineCatalog {
   atcCode           String?   @map("atc_code")
   price             Decimal   @db.Decimal(10, 2)
   stockQuantity     Int       @default(0) @map("stock_quantity")
+  batchNumber       String?   @map("batch_number")
   lowStockThreshold Int       @default(10) @map("low_stock_threshold")
   expiryDate        DateTime? @map("expiry_date")
   isActive          Boolean   @default(true) @map("is_active")

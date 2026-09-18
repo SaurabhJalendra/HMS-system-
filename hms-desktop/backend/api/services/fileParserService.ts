@@ -6,6 +6,7 @@ import fs from 'fs';
 
 export interface ParsedMedicine {
   name: string;
+  batchNumber?: string;
   genericName?: string;
   manufacturer?: string;
   category?: string;
@@ -65,17 +66,13 @@ export class FileParserService {
           .trim();
       };
 
-      // Column position is intentionally irrelevant: every field is mapped by
-      // its normalized header. Reject incomplete templates before importing.
+      // Column position is intentionally irrelevant. Imports need only the
+      // identity and inventory fields; all clinical/pricing metadata is optional.
       const normalizedHeaders = Object.keys(data[0] as Record<string, unknown>).map(normalizeColumnName);
       const requiredHeaders = [
-        { label: 'Medicine Name', aliases: ['medicine name', 'name', 'medicine', 'drug name', 'product name'] },
-        { label: 'Generic Name', aliases: ['generic name', 'generic', 'generic name inn'] },
-        { label: 'Manufacturer', aliases: ['manufacturer', 'company', 'company name', 'brand', 'supplier'] },
-        { label: 'Category', aliases: ['category', 'type', 'medicine category', 'drug category', 'class'] },
-        { label: 'Price', aliases: ['price', 'cost', 'unit price', 'selling price', 'mrp'] },
-        { label: 'Stock Quantity', aliases: ['quantity', 'stock', 'stock quantity', 'available stock', 'qty', 'units'] },
-        { label: 'Low Stock Threshold', aliases: ['low stock threshold', 'threshold', 'minimum stock', 'reorder level'] },
+        { label: 'Item Name', aliases: ['item name', 'medicine name', 'name', 'medicine', 'drug name', 'product name'] },
+        { label: 'Current Quantity', aliases: ['current quantity', 'current qty', 'current stock', 'quantity', 'stock', 'stock quantity', 'available stock', 'qty', 'units'] },
+        { label: 'Batch Number', aliases: ['batch number', 'batch no', 'batch', 'lot number', 'lot no'] },
       ];
       const missingHeaders = requiredHeaders
         .filter(({ aliases }) => !aliases.some((alias) => normalizedHeaders.includes(normalizeColumnName(alias))))
@@ -139,8 +136,13 @@ export class FileParserService {
         // Get medicine name (required field)
         const name = getColumnValue(
           row,
-          'Medicine Name (required)', 'Medicine Name', 'Name', 'medicine_name', 'Medicine', 
+          'Item Name', 'Medicine Name (required)', 'Medicine Name', 'Name', 'medicine_name', 'Medicine',
           'Drug Name', 'drug_name', 'Product Name', 'product_name'
+        );
+
+        const batchNumber = getColumnValue(
+          row,
+          'Batch Number', 'Batch No', 'Batch', 'batch_number', 'Lot Number', 'Lot No'
         );
         
         // Get other fields
@@ -206,10 +208,21 @@ export class FileParserService {
         // Parse stock quantity
         const quantityStr = getColumnValue(
           row,
-          'Quantity', 'Stock', 'stock_quantity', 'Stock Quantity', 
+          'Current Quantity', 'Current Qty', 'Current Stock', 'Quantity', 'Stock', 'stock_quantity', 'Stock Quantity',
           'Available Stock', 'available_stock', 'Qty', 'qty', 'Units', 'units'
         );
-        const stockQuantity = parseInt(quantityStr.replace(/[^\d]/g, '')) || 0;
+        const stockQuantity = Number(quantityStr);
+
+        const missingFields: string[] = [];
+        if (!name.trim()) missingFields.push('Item Name');
+        if (!quantityStr.trim()) missingFields.push('Current Quantity');
+        if (!batchNumber.trim()) missingFields.push('Batch Number');
+        if (missingFields.length) {
+          throw new Error(`Row ${index + 2}: missing required field(s): ${missingFields.join(', ')}`);
+        }
+        if (!Number.isInteger(stockQuantity) || stockQuantity < 0) {
+          throw new Error(`Row ${index + 2}: Current Quantity must be a whole number (0 or greater)`);
+        }
         
         // Parse low stock threshold
         const thresholdStr = getColumnValue(
@@ -245,6 +258,7 @@ export class FileParserService {
         
         return {
           name: name,
+          batchNumber,
           genericName: genericName || undefined,
           manufacturer: manufacturer || undefined,
           category: category,
@@ -253,7 +267,7 @@ export class FileParserService {
           price: price,
           currency: detectedCurrency || undefined, // Include detected currency
           priceColumnHeader: priceColumnHeader || undefined, // Include original column header
-          stockQuantity: stockQuantity,
+          stockQuantity,
           lowStockThreshold: lowStockThreshold,
           expiryDate: expiryDate
         };

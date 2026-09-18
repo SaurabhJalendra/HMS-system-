@@ -3,8 +3,15 @@ import appointmentService from '../../lib/api/services/appointmentService';
 import patientService from '../../lib/api/services/patientService';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
+import { toLocalYmd } from '../../lib/utils/localDate';
+import {
+  AppointmentStatus,
+  type CreateAppointmentRequest,
+  type UpdateAppointmentRequest,
+} from '../../lib/api/types';
 
-const AppointmentManagement = ({ user, isAuthenticated, onNavigate }) => {
+const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialAction = null }) => {
+  const showToday = initialAction === 'todayAppointments';
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -16,8 +23,8 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate }) => {
   const [doctors, setDoctors] = useState([]);
   const [patients, setPatients] = useState([]);
   const [searchFilters, setSearchFilters] = useState({
-    date: '',
-    doctorId: '',
+    date: showToday ? toLocalYmd() : '',
+    doctorId: showToday && user?.role === 'DOCTOR' ? user.id : '',
     status: ''
   });
   const [formData, setFormData] = useState({
@@ -47,10 +54,10 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate }) => {
     }
   };
 
-  const loadAppointments = async () => {
+  const loadAppointments = async (filters = searchFilters) => {
     try {
       setError('');
-      const response = await appointmentService.getAppointments();
+      const response = await appointmentService.getAppointments(filters);
       if (response.appointments) {
         setAppointments(response.appointments || []);
       } else {
@@ -123,14 +130,21 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate }) => {
       setError('');
       setSuccess('');
 
-      const appointmentData = {
+      const appointmentData: CreateAppointmentRequest = {
         ...formData,
+        status: formData.status as AppointmentStatus,
         date: formData.date + 'T00:00:00.000Z' // Convert to ISO string
       };
 
       if (editingAppointment) {
+        const updateData: UpdateAppointmentRequest = {
+          doctorId: appointmentData.doctorId,
+          date: appointmentData.date,
+          time: appointmentData.time,
+          status: appointmentData.status,
+        };
         // Update existing appointment
-        const response = await appointmentService.updateAppointment(editingAppointment.id, appointmentData);
+        const response = await appointmentService.updateAppointment(editingAppointment.id, updateData);
         if (response) {
           console.log('Appointment updated:', response);
           setSuccess('Appointment updated successfully');

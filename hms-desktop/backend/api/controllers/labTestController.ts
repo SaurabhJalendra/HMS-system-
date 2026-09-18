@@ -1,10 +1,37 @@
 import { Response } from 'express';
 import { logAudit } from '../utils/auditLogger';
-import { PrismaClient, LabTestStatus } from '@prisma/client';
+import { PrismaClient, LabTestStatus, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 
 const prisma = new PrismaClient();
+
+const labTestResponseInclude = {
+  patient: {
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      dateOfBirth: true,
+      gender: true,
+    },
+  },
+  orderedByUser: {
+    select: {
+      id: true,
+      fullName: true,
+      role: true,
+    },
+  },
+  testCatalog: {
+    select: {
+      id: true,
+      testName: true,
+      description: true,
+      price: true,
+    },
+  },
+};
 
 // Validation schemas
 const labTestCreateSchema = z.object({
@@ -94,6 +121,16 @@ export const createLabTest = async (req: AuthRequest, res: Response) => {
   try {
     const validatedData = labTestCreateSchema.parse(req.body);
 
+    if (
+      req.user?.role === UserRole.DOCTOR &&
+      validatedData.orderedBy !== req.user.id
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Doctors can only place lab orders under their own account',
+      });
+    }
+
     // Verify patient exists
     const patient = await prisma.patient.findUnique({
       where: { id: validatedData.patientId },
@@ -162,6 +199,15 @@ export const createLabTest = async (req: AuthRequest, res: Response) => {
           message: 'Only the consulting doctor can link lab orders to this consultation',
         });
       }
+      if (
+        req.user?.role === UserRole.DOCTOR &&
+        consultation.doctorId !== req.user.id
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: 'Doctors can only order tests for their own consultations',
+        });
+      }
       consultationIdLink = consultation.id;
       appointmentIdLink = consultation.appointmentId;
       if (
@@ -183,50 +229,70 @@ export const createLabTest = async (req: AuthRequest, res: Response) => {
           message: 'Appointment not found or does not match patient',
         });
       }
+      if (req.user?.role === UserRole.DOCTOR && appt.doctorId !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Doctors can only order tests for their own appointments',
+        });
+      }
       appointmentIdLink = validatedData.appointmentId;
     }
 
-    // Create lab test
-    const labTest = await prisma.labTest.create({
-      data: {
-        patientId: validatedData.patientId,
-        orderedBy: validatedData.orderedBy,
-        testCatalogId: validatedData.testCatalogId,
-        testNameSnapshot: testCatalog.testName,
-        priceSnapshot: testCatalog.price,
-        status: 'PENDING',
-        results: null,
-        notes: validatedData.notes ?? null,
-        consultationId: consultationIdLink ?? null,
-        appointmentId: appointmentIdLink ?? null,
-      },
-      include: {
-        patient: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            dateOfBirth: true,
-            gender: true,
+    // Retrying a partially completed hold request must not create the same test
+    // twice for one OPD visit. Unlinked/manual orders remain intentionally
+    // repeatable because they have no visit identity.
+    const visitIdentity = consultationIdLink
+      ? { consultationId: consultationIdLink }
+      : appointmentIdLink
+        ? { appointmentId: appointmentIdLink }
+        : null;
+
+    const result = await prisma.$transaction(async (tx) => {
+      if (visitIdentity) {
+        const visitKey = consultationIdLink || appointmentIdLink!;
+        // PostgreSQL transaction-level advisory locking closes the race between
+        // the retry check and insert without requiring a risky data migration.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`opd-lab:${visitKey}:${validatedData.testCatalogId}`}))`;
+        const existingLabTest = await tx.labTest.findFirst({
+          where: {
+            ...visitIdentity,
+            patientId: validatedData.patientId,
+            testCatalogId: validatedData.testCatalogId,
+            status: { not: LabTestStatus.CANCELLED },
           },
+          include: labTestResponseInclude,
+        });
+        if (existingLabTest) {
+          return { labTest: existingLabTest, alreadyExisted: true };
+        }
+      }
+
+      const labTest = await tx.labTest.create({
+        data: {
+          patientId: validatedData.patientId,
+          orderedBy: validatedData.orderedBy,
+          testCatalogId: validatedData.testCatalogId,
+          testNameSnapshot: testCatalog.testName,
+          priceSnapshot: testCatalog.price,
+          status: 'PENDING',
+          results: null,
+          notes: validatedData.notes ?? null,
+          consultationId: consultationIdLink ?? null,
+          appointmentId: appointmentIdLink ?? null,
         },
-        orderedByUser: {
-          select: {
-            id: true,
-            fullName: true,
-            role: true,
-          },
-        },
-        testCatalog: {
-          select: {
-            id: true,
-            testName: true,
-            description: true,
-            price: true,
-          },
-        },
-      },
+        include: labTestResponseInclude,
+      });
+      return { labTest, alreadyExisted: false };
     });
+
+    const { labTest, alreadyExisted } = result;
+    if (alreadyExisted) {
+      return res.status(200).json({
+        success: true,
+        message: 'Lab test was already ordered for this visit',
+        data: { labTest, alreadyExisted: true },
+      });
+    }
 
     // Log the action
     await logAudit({

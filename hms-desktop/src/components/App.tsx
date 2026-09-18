@@ -3,7 +3,7 @@ import { config } from '../config/environment';
 import { persistApiUrl, resolveStartupApiUrl } from '../lib/api/runtimeApiUrl';
 import authService from '../lib/api/services/authService';
 import configService from '../lib/api/services/configService';
-import { hasModuleAccess, isAdminLevelRole } from '../lib/utils/rolePermissions';
+import { hasModuleAccess } from '../lib/utils/rolePermissions';
 import { UpdateSessionProvider } from '../lib/contexts/UpdateSessionContext';
 import VersionCompatibilityBanner from './config/VersionCompatibilityBanner';
 import { DesktopUpdateAutoInstaller } from './config/AppUpdatePanel';
@@ -309,13 +309,6 @@ const App: React.FC = () => {
   const handleNavigation = (module: ModuleName, action: any = null): void => {
     const allowConfig = module === 'configuration';
     if (user && (allowConfig || hasModuleAccess(user.role, module))) {
-      const receptionistLike =
-        user.role === 'RECEPTIONIST' || isAdminLevelRole(user.role);
-      if (module === 'appointments' && receptionistLike) {
-        setCurrentModule('opdFlow');
-        setCurrentAction(action || 'bookAppointment');
-        return;
-      }
       setCurrentModule(module);
       setCurrentAction(action);
     } else {
@@ -365,24 +358,41 @@ const App: React.FC = () => {
           user,
           isAuthenticated,
           onBack: () => handleNavigation('dashboard'),
-          initialAction: currentAction,
+          initialAction:
+            typeof currentAction === 'string' ? currentAction : undefined,
         });
       case 'patients':
         return React.createElement(PatientManagement, { user, isAuthenticated });
       case 'appointments':
-        return React.createElement(AppointmentManagement, { user, isAuthenticated, onNavigate: handleNavigation });
+        return React.createElement(AppointmentManagement, {
+          key: `appointments-${currentAction || 'default'}`,
+          user,
+          isAuthenticated,
+          onNavigate: handleNavigation,
+          initialAction: currentAction,
+        });
       case 'consultations':
         return React.createElement(ConsultationManagement, {
+          key: `consultations-${currentAction || 'default'}`,
           user,
           isAuthenticated,
           onBack: () => handleNavigation('dashboard'),
           onNavigate: handleNavigation,
-          appointmentData: currentAction,
+          appointmentData:
+            currentAction && typeof currentAction === 'object' ? currentAction : undefined,
+          initialAction:
+            typeof currentAction === 'string' ? currentAction : undefined,
         });
       case 'users':
         return React.createElement(UserManagement, { user, isAuthenticated });
       case 'prescriptions':
-        return React.createElement(PrescriptionManagement, { user, isAuthenticated, onBack: () => handleNavigation('dashboard') });
+        return React.createElement(PrescriptionManagement, {
+          key: `prescriptions-${currentAction || 'default'}`,
+          user,
+          isAuthenticated,
+          onBack: () => handleNavigation('dashboard'),
+          initialAction: currentAction,
+        });
       case 'labTests':
         return React.createElement(LabTestManagement, { 
           user, 
@@ -390,9 +400,22 @@ const App: React.FC = () => {
           onBack: () => handleNavigation('dashboard') 
         });
       case 'medicines':
-        return React.createElement(MedicineManagement, { user, isAuthenticated, onBack: () => handleNavigation('dashboard') });
+        return React.createElement(MedicineManagement, {
+          key: `medicines-${currentAction || 'default'}`,
+          user,
+          isAuthenticated,
+          onBack: () => handleNavigation('dashboard'),
+          initialAction: currentAction,
+        });
       case 'billing':
-        return React.createElement(BillingManagement, { user, isAuthenticated, onBack: () => handleNavigation('dashboard') });
+        return React.createElement(BillingManagement, {
+          key: `billing-${currentAction || 'default'}`,
+          user,
+          isAuthenticated,
+          onBack: () => handleNavigation('dashboard'),
+          initialAction:
+            typeof currentAction === 'string' ? currentAction : undefined,
+        });
       case 'ipd':
         return React.createElement(IPDManagement, { user, isAuthenticated, onBack: () => handleNavigation('dashboard') });
       case 'ot':

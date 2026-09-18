@@ -5,7 +5,9 @@ export type OpdQueueRowKind = 'start' | 'held' | 'prescription' | 'completed';
 
 export function getOpdQueueRowKind(apt: Appointment): OpdQueueRowKind {
   const hasConsultation = (apt.consultations?.length ?? 0) > 0;
-  const hasPrescription = (apt.prescriptions?.length ?? 0) > 0;
+  const hasPrescription = (apt.prescriptions ?? []).some(
+    (prescription) => prescription.status !== 'CANCELLED',
+  );
   if (!hasConsultation) return 'start';
   if (hasPrescription) return 'completed';
   const heldUntil = apt.consultations?.[0]?.heldUntil;
