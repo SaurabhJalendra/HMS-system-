@@ -1,6 +1,18 @@
-export function cashReceivedForInvoice(status: string, totalAmount: number, paidAmount?: number | null): number {
-  const total = Number(totalAmount || 0);
-  const received = paidAmount == null ? null : Number(paidAmount);
+type MoneyLike = number | string | { toNumber?: () => number } | null | undefined;
+
+function toNullableNumber(value: MoneyLike): number | null {
+  if (value == null) return null;
+  if (typeof value === 'object' && typeof value.toNumber === 'function') {
+    const parsed = value.toNumber();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function cashReceivedForInvoice(status: string, totalAmount: MoneyLike, paidAmount?: MoneyLike): number {
+  const total = toNullableNumber(totalAmount) ?? 0;
+  const received = toNullableNumber(paidAmount);
 
   if (status === 'PAID') {
     return received != null && Number.isFinite(received) ? received : total;

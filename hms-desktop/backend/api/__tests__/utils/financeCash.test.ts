@@ -16,6 +16,7 @@ describe('financeCash', () => {
     expect(cashReceivedForInvoice('PARTIAL', 10000, 3000)).toBe(3000);
     expect(cashReceivedForInvoice('PARTIAL', 20000, 8000)).toBe(8000);
     expect(cashReceivedForInvoice('PARTIAL', 10000, null)).toBe(0);
+    expect(cashReceivedForInvoice('PARTIAL', { toNumber: () => 20000 }, { toNumber: () => 8000 })).toBe(8000);
   });
 
   it('ignores pending and cancelled invoices', () => {
