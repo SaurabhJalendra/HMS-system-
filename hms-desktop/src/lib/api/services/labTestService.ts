@@ -151,8 +151,10 @@ class LabTestService {
   // Test Catalog Management
 
   // Get test catalog
-  async getTestCatalog(isActive?: boolean): Promise<{ testCatalog: TestCatalog[] }> {
-    const params = isActive !== undefined ? { isActive } : {};
+  async getTestCatalog(isActive?: boolean, orderable = false): Promise<{ testCatalog: TestCatalog[] }> {
+    const params: Record<string, boolean> = {};
+    if (isActive !== undefined) params.isActive = isActive;
+    if (orderable) params.orderable = true;
     const response = await apiClient.get<ApiResponse<{ testCatalog: TestCatalog[] }>>(
       '/lab-tests/catalog',
       { params }
@@ -290,9 +292,23 @@ class LabTestService {
     return response.data.data;
   }
 
-  async setTechnicianTestSelections(data: { technicianId: string, testCatalogIds: string[], labType: string }): Promise<any> {
+  async setTechnicianTestSelections(data: {
+    technicianId: string;
+    testCatalogIds: string[];
+    labType: string;
+    datapointsByTest?: Record<string, Record<string, boolean>>;
+    pricesByTest?: Record<string, number>;
+  }): Promise<any> {
     const response = await apiClient.post<ApiResponse<any>>('/lab-tests/technician/set-selections', data);
     return response.data.data;
+  }
+
+  async downloadLabTestReport(id: string): Promise<void> {
+    const response = await apiClient.get(`/lab-tests/${id}/report`, { responseType: 'blob' });
+    const blob = new Blob([response.data]);
+    const url = window.URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
   }
 }
 

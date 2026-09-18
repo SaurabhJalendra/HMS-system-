@@ -21,6 +21,7 @@ import {
   setTechnicianTestSelections,
   getTechnicianAvailableTests,
   getLabTestCategories,
+  downloadLabTestReport,
 } from '../controllers/labTestController';
 
 const router = Router();
@@ -103,6 +104,11 @@ router.get('/technician/:technicianId/available-tests', requireRole(UserRole.ADM
 // @desc    Get lab test categories for filtering
 // @access  Private (Admin, Doctor, Receptionist, Lab Tech)
 router.get('/categories', requireRole(UserRole.ADMIN, UserRole.DOCTOR, UserRole.RECEPTIONIST, UserRole.LAB_TECH), getLabTestCategories);
+
+// @route   GET /api/lab-tests/:id/report
+// @desc    Download a lab report file (authenticated)
+// @access  Private (Admin, Doctor, Receptionist, Lab Tech)
+router.get('/:id/report', requireRole(UserRole.ADMIN, UserRole.DOCTOR, UserRole.RECEPTIONIST, UserRole.LAB_TECH), downloadLabTestReport);
 
 // @route   GET /api/lab-tests/:id
 // @desc    Get lab test by ID

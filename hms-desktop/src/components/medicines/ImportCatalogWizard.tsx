@@ -205,16 +205,16 @@ const ImportCatalogWizard = ({ onBack, onSuccess, user, isAuthenticated }) => {
             React.createElement(
               'div',
               { className: 'text-sm text-blue-700' },
-              React.createElement('p', { className: 'mb-2 font-medium' }, 'Required Excel columns (they may appear in any order):'),
+              React.createElement('p', { className: 'mb-2 font-medium' }, 'Required Excel columns (any order):'),
               React.createElement('ul', { className: 'list-disc list-inside ml-4' },
-                React.createElement('li', null, 'Item Name (required)'),
-                React.createElement('li', null, 'Current Quantity (required; may be 0)'),
-                React.createElement('li', null, 'Batch Number (required)')
+                React.createElement('li', null, 'Item Name'),
+                React.createElement('li', null, 'Strips'),
+                React.createElement('li', null, 'Tablets per strip')
               ),
               React.createElement(
                 'p',
                 { className: 'mt-2' },
-                'Optional columns: Generic Name, Manufacturer, Category, Price, Low Stock Threshold, ATC Code, Therapeutic Class, and Expiry Date. Values are mapped by column header, not column position.'
+                'Example: Strips 12 and Tablets per strip 10 is stored as 120 tablets and shown as 12-10. Older files with Current Quantity still import. Medicines missing from the file are left unchanged.'
               )
             )
           ),

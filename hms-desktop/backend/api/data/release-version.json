@@ -1,10 +1,10 @@
 {
-  "version": "1.0.23",
-  "backendVersion": "1.0.23",
+  "version": "1.0.24",
+  "backendVersion": "1.0.24",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.23",
+  "latestDesktopVersion": "1.0.24",
   "releaseNotes": [
-    "Fix OPD receptionist, doctor, consultation, lab, and prescription workflows"
+    "Bill full Rx course, cash P&L, and clinic-local salary dates"
   ],
-  "publishedAt": "2026-09-18T05:37:11.865Z"
+  "publishedAt": "2026-09-18T11:57:54.064Z"
 }

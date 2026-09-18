@@ -39,6 +39,7 @@ const createBillSchema = z.object({
   }),
   paymentMode: z.enum(['CASH', 'CARD', 'UPI', 'NET_BANKING', 'INSURANCE']).optional().default('CASH'),
   paymentStatus: z.enum(['PENDING', 'PAID', 'PARTIAL', 'CANCELLED']).optional().default('PAID'),
+  paidAmount: z.number().min(0).optional().nullable(),
   discountPct: z.number().min(0).max(100).optional().default(0),
   taxPct: z.number().min(0).optional().default(0),
 });
@@ -46,6 +47,7 @@ const createBillSchema = z.object({
 const updateBillSchema = z.object({
   paymentStatus: z.enum(['PENDING', 'PAID', 'PARTIAL', 'CANCELLED']).optional(),
   paymentMode: z.enum(['CASH', 'CARD', 'UPI', 'NET_BANKING', 'INSURANCE']).optional(),
+  paidAmount: z.number().min(0).optional().nullable(),
 });
 
 const billSearchSchema = z.object({
@@ -115,27 +117,37 @@ export const createBill = async (req: AuthRequest, res: Response) => {
     // Recompute every subtotal here rather than trusting the client. Sections are
     // rebuilt into a new object because the schema's `.default()` section objects
     // are shared across requests — mutating them in place leaks totals between bills.
+    const withLineAmounts = <T extends { quantity: number; unitPrice: number; amount: number }>(items: T[]) =>
+      items.map((item) => ({
+        ...item,
+        amount: Number((Number(item.quantity || 0) * Number(item.unitPrice || 0)).toFixed(2)),
+      }));
+
     const sumAmounts = (items: { amount: number }[]) =>
       items.reduce((total, item) => total + item.amount, 0);
 
     const sections = {
       consultation: {
-        items: validatedData.items.consultation.items,
-        subtotal: sumAmounts(validatedData.items.consultation.items),
+        items: withLineAmounts(validatedData.items.consultation.items),
+        subtotal: 0,
       },
       pharmacy: {
-        items: validatedData.items.pharmacy.items,
-        subtotal: sumAmounts(validatedData.items.pharmacy.items),
+        items: withLineAmounts(validatedData.items.pharmacy.items),
+        subtotal: 0,
       },
       labTests: {
-        items: validatedData.items.labTests.items,
-        subtotal: sumAmounts(validatedData.items.labTests.items),
+        items: withLineAmounts(validatedData.items.labTests.items),
+        subtotal: 0,
       },
       other: {
-        items: validatedData.items.other.items,
-        subtotal: sumAmounts(validatedData.items.other.items),
+        items: withLineAmounts(validatedData.items.other.items),
+        subtotal: 0,
       },
     };
+    sections.consultation.subtotal = sumAmounts(sections.consultation.items);
+    sections.pharmacy.subtotal = sumAmounts(sections.pharmacy.items);
+    sections.labTests.subtotal = sumAmounts(sections.labTests.items);
+    sections.other.subtotal = sumAmounts(sections.other.items);
 
     // Calculate total
     const subtotal = 
@@ -153,6 +165,16 @@ export const createBill = async (req: AuthRequest, res: Response) => {
 
     // Generate invoice number using prefix and next invoice number
     const invoiceNumber = await generateInvoiceNumber();
+    const paymentStatus = validatedData.paymentStatus || 'PAID';
+    const paidAmount =
+      validatedData.paidAmount != null
+        ? validatedData.paidAmount
+        : paymentStatus === 'PAID'
+          ? totalAmount
+          : paymentStatus === 'PARTIAL'
+            ? 0
+            : null;
+    const paidAt = paymentStatus === 'PAID' || paymentStatus === 'PARTIAL' ? new Date() : null;
 
     // Create bill
     const bill = await prisma.bill.create({
@@ -170,8 +192,10 @@ export const createBill = async (req: AuthRequest, res: Response) => {
         tax,
         totalAmount,
         paymentMode: validatedData.paymentMode,
-        paymentStatus: validatedData.paymentStatus || 'PAID',
-      },
+        paymentStatus,
+        paidAmount,
+        paidAt,
+      } as any,
       include: {
         patient: {
           select: {
@@ -390,12 +414,28 @@ export const updateBill = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const nextStatus = validatedData.paymentStatus ?? existingBill.paymentStatus;
+    const nextPaidAmount =
+      validatedData.paidAmount != null
+        ? validatedData.paidAmount
+        : nextStatus === 'PAID'
+          ? Number(existingBill.totalAmount)
+          : nextStatus === 'PARTIAL'
+            ? Number((existingBill as any).paidAmount ?? 0)
+            : null;
+    const nextPaidAt =
+      nextStatus === 'PAID' || nextStatus === 'PARTIAL'
+        ? ((existingBill as any).paidAt ?? new Date())
+        : null;
+
     const bill = await prisma.bill.update({
       where: { id },
       data: {
         ...validatedData,
+        paidAmount: nextPaidAmount,
+        paidAt: nextPaidAt,
         updatedAt: new Date(),
-      },
+      } as any,
       include: {
         patient: {
           select: {

@@ -4,6 +4,7 @@ import patientService from '../../lib/api/services/patientService';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useCriticalUpdateLock } from '../../lib/hooks/useCriticalUpdateLock';
 import { toLocalYmd } from '../../lib/utils/localDate';
+import { fetchAllPages } from '../../lib/utils/fetchAllPages';
 import {
   AppointmentStatus,
   type CreateAppointmentRequest,
@@ -22,6 +23,8 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialActio
 
   const [doctors, setDoctors] = useState([]);
   const [patients, setPatients] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [searchFilters, setSearchFilters] = useState({
     date: showToday ? toLocalYmd() : '',
     doctorId: showToday && user?.role === 'DOCTOR' ? user.id : '',
@@ -42,11 +45,15 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialActio
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      await Promise.all([
+      const results = await Promise.allSettled([
         loadAppointments(),
         loadDoctors(),
         loadPatients()
       ]);
+      const failed = results.find((result) => result.status === 'rejected');
+      if (failed && failed.status === 'rejected') {
+        setError('Error loading initial data: ' + (failed.reason?.message || 'One or more lists failed'));
+      }
     } catch (err) {
       setError('Error loading initial data: ' + err.message);
     } finally {
@@ -54,12 +61,21 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialActio
     }
   };
 
-  const loadAppointments = async (filters = searchFilters) => {
+  const loadAppointments = async (filters = searchFilters, page = currentPage) => {
     try {
       setError('');
-      const response = await appointmentService.getAppointments(filters);
+      const response = await appointmentService.getAppointments({
+        ...filters,
+        page,
+        limit: 20,
+      });
       if (response.appointments) {
         setAppointments(response.appointments || []);
+        const nextTotalPages = Math.max(1, response.pagination?.totalPages || 1);
+        setTotalPages(nextTotalPages);
+        if (page > nextTotalPages) {
+          setCurrentPage(nextTotalPages);
+        }
       } else {
         setError('Failed to load appointments');
       }
@@ -80,10 +96,14 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialActio
 
   const loadPatients = async () => {
     try {
-      const response = await patientService.getPatients();
-      if (response.patients) {
-        setPatients(response.patients || []);
-      }
+      const allPatients = await fetchAllPages(async (page, limit) => {
+        const response = await patientService.getPatients({ page, limit });
+        return {
+          items: response.patients || [],
+          totalPages: response.pagination?.totalPages,
+        };
+      });
+      setPatients(allPatients);
     } catch (err) {
       console.error('Load patients error:', err);
     }
@@ -92,9 +112,15 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialActio
   const handleSearch = async () => {
     try {
       setLoading(true);
-      const response = await appointmentService.getAppointments(searchFilters);
+      setCurrentPage(1);
+      const response = await appointmentService.getAppointments({
+        ...searchFilters,
+        page: 1,
+        limit: 20,
+      });
       if (response.appointments) {
         setAppointments(response.appointments || []);
+        setTotalPages(Math.max(1, response.pagination?.totalPages || 1));
       } else {
         setError('Search failed');
       }
@@ -640,6 +666,47 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialActio
               )
             ))
           )
+        )
+      ),
+      totalPages > 1 && React.createElement(
+        'div',
+        { className: 'mt-4 flex items-center justify-between border-t border-gray-200 pt-4' },
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: async () => {
+              const nextPage = Math.max(1, currentPage - 1);
+              setCurrentPage(nextPage);
+              setLoading(true);
+              await loadAppointments(searchFilters, nextPage);
+              setLoading(false);
+            },
+            disabled: currentPage === 1,
+            className: 'px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+          },
+          'Previous'
+        ),
+        React.createElement(
+          'span',
+          { className: 'text-sm text-gray-700' },
+          `Page ${currentPage} of ${totalPages}`
+        ),
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: async () => {
+              const nextPage = Math.min(totalPages, currentPage + 1);
+              setCurrentPage(nextPage);
+              setLoading(true);
+              await loadAppointments(searchFilters, nextPage);
+              setLoading(false);
+            },
+            disabled: currentPage >= totalPages,
+            className: 'px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+          },
+          'Next'
         )
       )
     )

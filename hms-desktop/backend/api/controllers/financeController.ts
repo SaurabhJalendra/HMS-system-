@@ -2,6 +2,13 @@ import { Response } from 'express';
 import { PrismaClient, PaymentStatus } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
+import {
+  cashEventDate,
+  cashReceivedForInvoice,
+  isDateInsideRange,
+  parseLocalDayEnd,
+  parseLocalDayStart,
+} from '../utils/financeCash';
 
 const prisma = new PrismaClient();
 
@@ -9,16 +16,6 @@ const plQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
 });
-
-function parseLocalDayStart(isoDate: string) {
-  const [y, m, d] = isoDate.split('-').map(Number);
-  return new Date(y, m - 1, d, 0, 0, 0, 0);
-}
-
-function parseLocalDayEnd(isoDate: string) {
-  const [y, m, d] = isoDate.split('-').map(Number);
-  return new Date(y, m - 1, d, 23, 59, 59, 999);
-}
 
 function toDateRange(from?: string, to?: string) {
   const now = new Date();
@@ -35,14 +32,19 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
     const { from, to } = plQuerySchema.parse(req.query);
     const { start, end } = toDateRange(from, to);
 
-    const [opdRevenueAgg, ipdRevenueAgg, expensesAgg] = await Promise.all([
-      prisma.bill.aggregate({
-        where: { paymentStatus: { in: ['PAID', 'PARTIAL'] }, createdAt: { gte: start, lte: end } },
-        _sum: { totalAmount: true },
+    const [opdBills, ipdBills, expensesAgg] = await Promise.all([
+      prisma.bill.findMany({
+        where: { paymentStatus: { in: ['PAID', 'PARTIAL'] } },
       }),
-      prisma.inpatientBill.aggregate({
-        where: { status: 'PAID', createdAt: { gte: start, lte: end } },
-        _sum: { totalAmount: true },
+      prisma.inpatientBill.findMany({
+        where: { status: { in: ['PAID', 'PARTIAL'] } },
+        select: {
+          totalAmount: true,
+          status: true,
+          paidAmount: true,
+          createdAt: true,
+          updatedAt: true,
+        },
       }),
       prisma.expense.aggregate({
         where: { paymentStatus: PaymentStatus.PAID, expenseDate: { gte: start, lte: end } },
@@ -50,8 +52,6 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
       }),
     ]);
 
-    // Medicine purchases expense (paid)
-    // Use paymentDate when available; otherwise fall back to orderDate for PAID orders missing paymentDate.
     const [medicinePaidWithDateAgg, medicinePaidWithoutDateAgg] = await Promise.all([
       prisma.medicineOrder.aggregate({
         where: {
@@ -70,14 +70,22 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
       }),
     ]);
 
-    const opdRevenue = Number(opdRevenueAgg._sum.totalAmount || 0);
-    const ipdRevenue = Number(ipdRevenueAgg._sum.totalAmount || 0);
-    const totalRevenue = opdRevenue + ipdRevenue;
+    const opdRevenue = opdBills.reduce((sum, bill: any) => {
+      const eventDate = cashEventDate(bill.paidAt, bill.createdAt);
+      if (!isDateInsideRange(eventDate, start, end)) return sum;
+      return sum + cashReceivedForInvoice(bill.paymentStatus, Number(bill.totalAmount), bill.paidAmount);
+    }, 0);
 
+    const ipdRevenue = ipdBills.reduce((sum, bill) => {
+      const eventDate = cashEventDate(bill.updatedAt, bill.createdAt);
+      if (!isDateInsideRange(eventDate, start, end)) return sum;
+      return sum + cashReceivedForInvoice(bill.status, Number(bill.totalAmount), bill.paidAmount);
+    }, 0);
+
+    const totalRevenue = opdRevenue + ipdRevenue;
     const manualExpenses = Number(expensesAgg._sum.amount || 0);
     const medicinePurchases =
       Number(medicinePaidWithDateAgg._sum.totalAmount || 0) + Number(medicinePaidWithoutDateAgg._sum.totalAmount || 0);
-
     const totalExpenses = manualExpenses + medicinePurchases;
     const profitOrLoss = totalRevenue - totalExpenses;
 
@@ -91,7 +99,7 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
           total: totalRevenue,
         },
         expenses: {
-          manual: manualExpenses, // salaries + misc stored in expenses table
+          manual: manualExpenses,
           medicinePurchases,
           total: totalExpenses,
         },
@@ -102,8 +110,7 @@ export const getProfitLoss = async (req: AuthRequest, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ success: false, message: 'Validation error', errors: error.issues });
     }
-    console.error('Get profit/loss error:', error);
+    console.error('Get profit/loss error', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
-

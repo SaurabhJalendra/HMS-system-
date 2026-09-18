@@ -4,6 +4,7 @@ import wardService from '../../lib/api/services/wardService';
 import bedService from '../../lib/api/services/bedService';
 import patientService from '../../lib/api/services/patientService';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
+import { fetchAllPages } from '../../lib/utils/fetchAllPages';
 
 const AdmissionManagement = ({ onBack, isAuthenticated }) => {
   const { formatCurrency } = useHospitalConfig();
@@ -22,6 +23,8 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
   const [filterWard, setFilterWard] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   
   // Form states
   const [formData, setFormData] = useState({
@@ -58,6 +61,10 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
   ];
 
   useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterWard, filterStatus, filterType]);
+
+  useEffect(() => {
     if (isAuthenticated) {
       loadWards();
       loadPatients();
@@ -65,7 +72,7 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
     } else {
       setError('Please login to access admission management');
     }
-  }, [isAuthenticated, searchTerm, filterWard, filterStatus, filterType]);
+  }, [isAuthenticated, searchTerm, filterWard, filterStatus, filterType, currentPage]);
 
   useEffect(() => {
     if (formData.wardId) {
@@ -76,19 +83,11 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
   const loadWards = async () => {
     try {
       console.log('🏥 Loading wards for admission form...');
-      const response = await wardService.getWards({ page: 1, limit: 100 });
-      console.log('🏥 Ward service response:', response);
-      
-      // Handle different response structures
-      let wardsList = [];
-      if (response && response.wards && Array.isArray(response.wards)) {
-        wardsList = response.wards;
-      } else if (response && response.data && response.data.wards && Array.isArray(response.data.wards)) {
-        wardsList = response.data.wards;
-      } else if (Array.isArray(response)) {
-        wardsList = response;
-      }
-      
+      const wardsList = await fetchAllPages(async (page, limit) => {
+        const response = await wardService.getWards({ page, limit });
+        const items = response?.wards || response?.data?.wards || (Array.isArray(response) ? response : []);
+        return { items, totalPages: response?.pagination?.totalPages || response?.data?.pagination?.totalPages };
+      });
       console.log(`✅ Loaded ${wardsList.length} wards`);
       setWards(wardsList);
     } catch (err) {
@@ -101,19 +100,11 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
   const loadPatients = async () => {
     try {
       console.log('👥 Loading patients for admission form...');
-      const response = await patientService.getPatients({ page: 1, limit: 100 });
-      console.log('👥 Patient service response:', response);
-      
-      // Handle different response structures
-      let patientsList = [];
-      if (response && response.patients && Array.isArray(response.patients)) {
-        patientsList = response.patients;
-      } else if (response && response.data && response.data.patients && Array.isArray(response.data.patients)) {
-        patientsList = response.data.patients;
-      } else if (Array.isArray(response)) {
-        patientsList = response;
-      }
-      
+      const patientsList = await fetchAllPages(async (page, limit) => {
+        const response = await patientService.getPatients({ page, limit });
+        const items = response?.patients || response?.data?.patients || (Array.isArray(response) ? response : []);
+        return { items, totalPages: response?.pagination?.totalPages || response?.data?.pagination?.totalPages };
+      });
       console.log(`✅ Loaded ${patientsList.length} patients`);
       setPatients(patientsList);
     } catch (err) {
@@ -163,8 +154,9 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
     setLoading(true);
     try {
       const params = {
-        page: 1,
-        limit: 100,
+        page: currentPage,
+        limit: 20,
+        ...(searchTerm && { search: searchTerm }),
         ...(filterWard && { wardId: filterWard }),
         ...(filterStatus && { status: filterStatus }),
         ...(filterType && { admissionType: filterType })
@@ -186,6 +178,11 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
       
       console.log(`✅ Loaded ${admissionsList.length} admissions`);
       setAdmissions(admissionsList);
+      const nextTotalPages = Math.max(1, response?.pagination?.totalPages || response?.data?.pagination?.totalPages || 1);
+      setTotalPages(nextTotalPages);
+      if (currentPage > nextTotalPages) {
+        setCurrentPage(nextTotalPages);
+      }
       setError('');
     } catch (err) {
       console.error('❌ Error loading admissions:', err);
@@ -443,9 +440,14 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
     return admissionStatuses.find(s => s.value === status) || { value: status, label: status, icon: '❓', color: '#6c757d' };
   };
 
-  const getPatientName = (patientId) => {
-    const patient = patients.find(p => p.id === patientId);
-    return patient ? patient.name : 'Unknown Patient';
+  const getPatientName = (admissionOrPatientId) => {
+    if (admissionOrPatientId && typeof admissionOrPatientId === 'object') {
+      if (admissionOrPatientId.patient?.name) return admissionOrPatientId.patient.name;
+      const linked = patients.find((p) => p.id === admissionOrPatientId.patientId);
+      return linked?.name || 'Unknown Patient';
+    }
+    const patient = patients.find((p) => p.id === admissionOrPatientId);
+    return patient?.name || 'Unknown Patient';
   };
 
   const getWardName = (wardId) => {
@@ -489,7 +491,7 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
         if (!admission || typeof admission !== 'object') return false;
         
         try {
-          const patientName = getPatientName(admission.patientId || '');
+          const patientName = getPatientName(admission);
           const matchesSearch = patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                                (admission.admissionReason && admission.admissionReason.toLowerCase().includes(searchTerm.toLowerCase())) ||
                                (admission.notes && admission.notes.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -931,7 +933,7 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
                 try {
                   const typeInfo = getAdmissionTypeInfo(admission.admissionType);
                   const statusInfo = getAdmissionStatusInfo(admission.status);
-                  const patientName = getPatientName(admission.patientId);
+                  const patientName = getPatientName(admission);
                   const wardName = getWardName(admission.wardId);
                   const bedNumber = getBedNumber(admission.bedId);
                 
@@ -1096,6 +1098,31 @@ const AdmissionManagement = ({ onBack, isAuthenticated }) => {
             )
           )
         )
+      )
+    ),
+    totalPages > 1 && React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8' } },
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => setCurrentPage((page) => Math.max(1, page - 1)),
+          disabled: currentPage === 1,
+          style: { padding: '6px 12px', cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }
+        },
+        'Previous'
+      ),
+      React.createElement('span', { style: { fontSize: '13px' } }, `Page ${currentPage} of ${totalPages}`),
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => setCurrentPage((page) => Math.min(totalPages, page + 1)),
+          disabled: currentPage >= totalPages,
+          style: { padding: '6px 12px', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer' }
+        },
+        'Next'
       )
     ),
 

@@ -1,6 +1,6 @@
 /**
- * Shared rules for how many physical units (tablets, etc.) a prescription line represents
- * when dispensing — used by dispense flow and inventory reconciliation.
+ * Shared rules for how many physical units a prescription line represents.
+ * Keep in sync with backend/api/utils/prescriptionDispenseUnits.ts.
  */
 
 export function parseDosesPerDayFromFrequency(frequency: string): number | null {

@@ -159,6 +159,7 @@ model MedicineCatalog {
   atcCode           String?   @map("atc_code")
   price             Decimal   @db.Decimal(10, 2)
   stockQuantity     Int       @default(0) @map("stock_quantity")
+  tabletsPerStrip   Int?      @map("tablets_per_strip")
   batchNumber       String?   @map("batch_number")
   lowStockThreshold Int       @default(10) @map("low_stock_threshold")
   expiryDate        DateTime? @map("expiry_date")
@@ -383,14 +384,16 @@ model LabTest {
 // 8. Medicine Transactions table - Medicine dispensing transactions
 model MedicineTransaction {
   id                String   @id @default(cuid())
-  prescriptionId    String   @map("prescription_id")
+  prescriptionId    String?  @map("prescription_id")
   medicineId        String   @map("medicine_id")
   quantityDispensed Int      @map("quantity_dispensed")
   dispensedBy       String   @map("dispensed_by")
   dispensedAt       DateTime @default(now()) @map("dispensed_at")
+  reason            String?
+  adjustmentType    String?  @map("adjustment_type")
 
   // Relations
-  prescription    Prescription    @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  prescription    Prescription?   @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
   medicine        MedicineCatalog @relation(fields: [medicineId], references: [id])
   dispensedByUser User            @relation("DispensedMedicines", fields: [dispensedBy], references: [id])
 
@@ -409,6 +412,8 @@ model Bill {
   totalAmount    Decimal       @map("total_amount") @db.Decimal(10, 2)
   paymentMode    PaymentMode   @map("payment_mode")
   paymentStatus  PaymentStatus @default(PENDING) @map("payment_status")
+  paidAmount     Decimal?      @map("paid_amount") @db.Decimal(10, 2)
+  paidAt         DateTime?     @map("paid_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
@@ -894,13 +899,15 @@ model LabTestConfig {
 
 // Technician Test Selection - Maps technicians to their available tests
 model TechnicianTestSelection {
-  id            String   @id @default(cuid())
-  technicianId  String   @map("technician_id")
-  testCatalogId String   @map("test_catalog_id")
-  labType       String   @map("lab_type") // General, MRI, CT Scan, X-Ray, etc.
-  isActive      Boolean  @default(true) @map("is_active")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id                 String   @id @default(cuid())
+  technicianId       String   @map("technician_id")
+  testCatalogId      String   @map("test_catalog_id")
+  labType            String   @map("lab_type") // General, MRI, CT Scan, X-Ray, etc.
+  isActive           Boolean  @default(true) @map("is_active")
+  selectedDatapoints Json?    @map("selected_datapoints")
+  customPrice        Decimal? @map("custom_price") @db.Decimal(10, 2)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   // Relations
   technician  User        @relation(fields: [technicianId], references: [id], onDelete: Cascade)

@@ -14,6 +14,7 @@ import {
   shouldShowAvailableModules,
   canEditPrescription,
   canMutatePatientRecord,
+  canMutateConsultation,
 } from '../../lib/utils/rolePermissions';
 import { UserRole } from '../../lib/api/types';
 
@@ -293,6 +294,19 @@ describe('Role Permissions', () => {
         const modules = getAvailableIPDSubModules('UNKNOWN_ROLE' as UserRole);
         expect(modules).toEqual([]);
       });
+    });
+  });
+
+  describe('canMutateConsultation', () => {
+    it('allows admin-level roles and doctors to edit consultations', () => {
+      expect(canMutateConsultation(UserRole.ADMIN)).toBe(true);
+      expect(canMutateConsultation(UserRole.SUBADMIN)).toBe(true);
+      expect(canMutateConsultation(UserRole.DOCTOR)).toBe(true);
+    });
+
+    it('hides consultation edit/delete from reception and pharmacy', () => {
+      expect(canMutateConsultation(UserRole.RECEPTIONIST)).toBe(false);
+      expect(canMutateConsultation(UserRole.PHARMACY)).toBe(false);
     });
   });
 });

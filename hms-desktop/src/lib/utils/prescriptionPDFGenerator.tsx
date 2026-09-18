@@ -1,4 +1,5 @@
 import React from 'react';
+import { unitsForBillLine } from './prescriptionDispenseUnits';
 
 const PrescriptionPDFGenerator = {
   // Generate prescription PDF (client-side using browser's print functionality)
@@ -78,19 +79,11 @@ const PrescriptionPDFGenerator = {
 
     // Calculate total quantity
     const calculateTotalQuantity = (item) => {
-      const freq = item.frequency || '';
-      let timesPerDay = 1;
-      if (freq.toUpperCase().includes('BD') || freq.toUpperCase() === 'BID') timesPerDay = 2;
-      else if (freq.toUpperCase().includes('TID')) timesPerDay = 3;
-      else if (freq.toUpperCase().includes('QID')) timesPerDay = 4;
-      else if (freq.includes('Morning') && freq.includes('Night')) timesPerDay = 2;
-      else if (freq.includes('Morning') && freq.includes('Aft') && freq.includes('Night')) timesPerDay = 3;
-      else if (freq.includes('Morning') && freq.includes('Aft') && freq.includes('Eve') && freq.includes('Night')) timesPerDay = 4;
-      
-      const quantity = item.quantity || 1;
-      const duration = item.duration || 1;
-      const total = quantity * timesPerDay * duration;
-      return total;
+      return unitsForBillLine({
+        quantity: Number(item.quantity ?? 1),
+        frequency: item.frequency,
+        duration: Number(item.duration ?? 1),
+      });
     };
 
     // Get medicine type abbreviation

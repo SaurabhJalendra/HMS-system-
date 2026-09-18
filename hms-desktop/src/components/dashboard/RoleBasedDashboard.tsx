@@ -22,7 +22,7 @@ import {
   loadPharmacyDashboardData,
 } from '../../lib/utils/roleDashboardData';
 
-const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashboard' }: any) => {
+const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashboard', initialAction = null }: any) => {
   const [dashboardData, setDashboardData] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -46,6 +46,12 @@ const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashb
   useEffect(() => {
     loadDashboardData();
   }, [userRole, user?.id]);
+
+  useEffect(() => {
+    if (initialAction !== 'viewStats' || loading) return;
+    const statsCard = document.getElementById('dashboard-system-stats');
+    statsCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [initialAction, loading]);
 
   const loadDashboardData = async () => {
     try {
@@ -78,14 +84,41 @@ const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashb
           time: p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '',
           phone: p.phone,
         }));
+        const userActivity = (userStats?.usersByRole || []).map((row) => ({
+          name: String(row.role || 'Unknown role'),
+          time: `${row._count?.role ?? 0} accounts`,
+          status: 'Active',
+        }));
+        const systemAlerts = [
+          ...(userStats && userStats.inactiveUsers > 0
+            ? [{ name: `${userStats.inactiveUsers} inactive user account(s)`, status: 'Review' }]
+            : []),
+          ...(appointmentStats && (appointmentStats.todayAppointments ?? appointmentStats.totalAppointments) === 0
+            ? [{ name: 'No appointments recorded yet', status: 'Info' }]
+            : []),
+        ];
+        const recentActivities = [
+          ...recentUsers.map((entry) => ({
+            name: `User · ${entry.name}`,
+            time: entry.time,
+            role: entry.role,
+            status: entry.status,
+          })),
+          ...recentPatients.map((entry) => ({
+            name: `Patient · ${entry.name}`,
+            time: entry.time,
+            phone: entry.phone,
+            status: 'Registered',
+          })),
+        ];
 
         setDashboardData({
           totalUsers: userStats?.totalUsers ?? 0,
           totalPatients: patientStats?.totalPatients ?? 0,
           totalAppointments: appointmentStats?.totalAppointments ?? 0,
-          systemAlerts: [],
-          recentActivities: [],
-          userActivity: [],
+          systemAlerts,
+          recentActivities,
+          userActivity,
           recentUsers,
           recentPatients,
         });
@@ -175,10 +208,19 @@ const RoleBasedDashboard = ({ user, onNavigate, onLogout, currentModule = 'dashb
       value: formatStatDisplay(statKey, dashboardData[statKey]),
       label: statKey.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
     }));
+    const highlightStats = initialAction === 'viewStats' && widget.title === 'System Overview';
 
     return React.createElement(
       'div',
-      { style: getWidgetContainerStyle() },
+      {
+        id: highlightStats ? 'dashboard-system-stats' : undefined,
+        style: {
+          ...getWidgetContainerStyle(),
+          ...(highlightStats
+            ? { outline: '2px solid #2563EB', boxShadow: '0 0 0 3px rgba(37, 99, 235, 0.15)' }
+            : {}),
+        },
+      },
       React.createElement(
         'h3',
         { style: getWidgetTitleStyle() },

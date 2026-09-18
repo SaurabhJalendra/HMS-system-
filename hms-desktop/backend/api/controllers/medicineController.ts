@@ -4,6 +4,7 @@ import { PrismaClient, PrescriptionStatus } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { computeUnitsToDispenseForLine } from '../utils/prescriptionDispenseUnits';
+import { decorateMedicinePack, resolveTabletQuantity } from '../utils/medicinePack';
 import { FileParserService } from '../services/fileParserService';
 import { getRequiredHospitalId } from '../utils/hospitalHelper';
 import { getHospitalCurrencies, convertCurrency } from '../services/currencyService';
@@ -30,8 +31,10 @@ const medicineCreateSchema = z.object({
   batchNumber: z.string().max(100, 'Batch number too long').optional(),
   storageConditions: z.string().max(500, 'Storage conditions too long').optional(),
   prescriptionRequired: z.boolean().optional(),
-  quantity: z.union([z.number().int().min(0), z.string()]).transform(val => typeof val === 'string' ? parseInt(val) || 0 : val).pipe(z.number().int().min(0, 'Quantity must be non-negative')),
-  price: z.union([z.number().positive(), z.string()]).transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val).pipe(z.number().positive('Price must be positive')),
+  quantity: z.union([z.number().int().min(0), z.string()]).transform(val => typeof val === 'string' ? parseInt(val) || 0 : val).pipe(z.number().int().min(0, 'Quantity must be non-negative')).optional(),
+  strips: z.union([z.number().int().min(0), z.string()]).optional(),
+  tabletsPerStrip: z.union([z.number().int().min(1), z.string()]).optional(),
+  price: z.union([z.number().min(0), z.string()]).transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val).pipe(z.number().min(0, 'Price must be non-negative')).optional(),
   lowStockThreshold: z.union([z.number().int().min(0), z.string()]).transform(val => typeof val === 'string' ? parseInt(val) || 10 : val).pipe(z.number().int().min(0, 'Low stock threshold must be non-negative')).optional(),
 });
 
@@ -62,8 +65,8 @@ const medicineUpdateSchema = z.preprocess(
     batchNumber: z.string().max(100, 'Batch number too long').optional(),
     storageConditions: z.string().max(500, 'Storage conditions too long').optional(),
     prescriptionRequired: z.boolean().optional(),
-    quantity: z.union([z.number().int().min(0), z.string()]).transform(val => typeof val === 'string' ? parseInt(val) || 0 : val).pipe(z.number().int().min(0, 'Quantity must be non-negative')).optional(),
-    price: z.union([z.number().positive(), z.string()]).transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val).pipe(z.number().positive('Price must be positive')).optional(),
+    tabletsPerStrip: z.union([z.number().int().min(1), z.string()]).optional(),
+    price: z.union([z.number().min(0), z.string()]).transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val).pipe(z.number().min(0, 'Price must be non-negative')).optional(),
     lowStockThreshold: z.union([z.number().int().min(0), z.string()]).transform(val => typeof val === 'string' ? parseInt(val) || 10 : val).pipe(z.number().int().min(0, 'Low stock threshold must be non-negative')).optional(),
   })
 );
@@ -79,7 +82,9 @@ const medicineSearchSchema = z.object({
 const stockUpdateSchema = z.preprocess(
   stripNullBodyFields,
   z.object({
-    quantity: z.coerce.number().int(),
+    quantity: z.union([z.number().int().min(0), z.string()]).optional(),
+    strips: z.union([z.number().int().min(0), z.string()]).optional(),
+    tabletsPerStrip: z.union([z.number().int().min(1), z.string()]).optional(),
     operation: z.enum(['add', 'subtract', 'set']),
     reason: z.string().optional(),
   })
@@ -110,6 +115,20 @@ export const createMedicine = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    let pack;
+    try {
+      pack = resolveTabletQuantity({
+        quantity: validatedData.quantity,
+        strips: validatedData.strips,
+        tabletsPerStrip: validatedData.tabletsPerStrip,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : 'Invalid stock quantity',
+      });
+    }
+
     // Create medicine in MedicineCatalog
     const medicine = await prisma.medicineCatalog.create({
       data: {
@@ -120,13 +139,14 @@ export const createMedicine = async (req: AuthRequest, res: Response) => {
         category: validatedData.category || 'General',
         therapeuticClass: validatedData.therapeuticClass || null,
         atcCode: validatedData.atcCode || null,
-        price: validatedData.price,
-        stockQuantity: validatedData.quantity ?? 0,
+        price: validatedData.price ?? 0,
+        stockQuantity: pack.quantity,
+        tabletsPerStrip: pack.tabletsPerStrip,
         batchNumber: validatedData.batchNumber?.trim() || null,
         lowStockThreshold: validatedData.lowStockThreshold ?? 10,
         expiryDate: validatedData.expiryDate || null,
         isActive: true,
-      },
+      } as any,
     });
 
     // Log the action
@@ -215,12 +235,19 @@ export const getMedicines = async (req: AuthRequest, res: Response) => {
         ? basePrice * (1 + markupPercentage / 100)
         : basePrice;
 
-      return {
+      return decorateMedicinePack({
         ...medicine,
         price: basePrice, // Keep base price
         sellingPrice: sellingPrice, // Add selling price with markup
         stockStatus: medicine.stockQuantity <= medicine.lowStockThreshold ? 'LOW' : 'OK',
-      };
+      });
+    });
+
+    const categoryRows = await prisma.medicineCatalog.findMany({
+      where: { isActive: true },
+      distinct: ['category'],
+      select: { category: true },
+      orderBy: { category: 'asc' },
     });
 
     const totalPages = Math.ceil(total / limit);
@@ -229,6 +256,7 @@ export const getMedicines = async (req: AuthRequest, res: Response) => {
       success: true,
       data: {
         medicines: medicinesWithStatus,
+        categories: categoryRows.map((row) => row.category).filter(Boolean),
         pagination: {
           currentPage: page,
           totalPages,
@@ -350,7 +378,12 @@ export const updateMedicine = async (req: AuthRequest, res: Response) => {
     if (validatedData.atcCode !== undefined) updateData.atcCode = validatedData.atcCode;
     if (validatedData.code !== undefined) updateData.code = validatedData.code;
     if (validatedData.price !== undefined) updateData.price = validatedData.price;
-    if (validatedData.quantity !== undefined) updateData.stockQuantity = validatedData.quantity;
+    if (validatedData.tabletsPerStrip !== undefined) {
+      const parsedPerStrip = Number(validatedData.tabletsPerStrip);
+      if (Number.isInteger(parsedPerStrip) && parsedPerStrip >= 1) {
+        updateData.tabletsPerStrip = parsedPerStrip;
+      }
+    }
     if (validatedData.batchNumber !== undefined) {
       updateData.batchNumber = validatedData.batchNumber.trim() || null;
     }
@@ -413,8 +446,24 @@ export const updateMedicineStock = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    let pack;
+    try {
+      pack = resolveTabletQuantity({
+        quantity: validatedData.quantity,
+        strips: validatedData.strips,
+        tabletsPerStrip: validatedData.tabletsPerStrip,
+        existingTabletsPerStrip: (existingMedicine as { tabletsPerStrip?: number | null }).tabletsPerStrip,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : 'Invalid stock quantity',
+      });
+    }
+
+    const quantity = pack.quantity;
+    const { operation, reason } = validatedData;
     let newQuantity: number;
-    const { quantity, operation, reason } = validatedData;
 
     switch (operation) {
       case 'add':
@@ -436,7 +485,25 @@ export const updateMedicineStock = async (req: AuthRequest, res: Response) => {
     // Update medicine quantity
     const updatedMedicine = await prisma.medicineCatalog.update({
       where: { id },
-      data: { stockQuantity: newQuantity },
+      data: {
+        stockQuantity: newQuantity,
+        tabletsPerStrip: pack.tabletsPerStrip ?? (existingMedicine as { tabletsPerStrip?: number | null }).tabletsPerStrip,
+      } as any,
+    });
+
+    const tabletDelta =
+      operation === 'subtract'
+        ? existingMedicine.stockQuantity - newQuantity
+        : newQuantity - existingMedicine.stockQuantity;
+
+    await prisma.medicineTransaction.create({
+      data: {
+        medicineId: id,
+        quantityDispensed: operation === 'subtract' ? -Math.abs(tabletDelta) : tabletDelta,
+        dispensedBy: req.user!.id,
+        reason: reason?.trim() || `Stock ${operation}`,
+        adjustmentType: operation.toUpperCase(),
+      } as any,
     });
 
     // Log the action
@@ -446,7 +513,7 @@ export const updateMedicineStock = async (req: AuthRequest, res: Response) => {
       tableName: 'medicine_catalog',
       recordId: id,
       oldValue: { stockQuantity: existingMedicine.stockQuantity },
-      newValue: { stockQuantity: newQuantity, operation, reason },
+      newValue: { stockQuantity: newQuantity, operation, reason, tabletsPerStrip: pack.tabletsPerStrip },
     });
 
     res.json({
@@ -614,10 +681,12 @@ export const getLowStockMedicines = async (req: AuthRequest, res: Response) => {
     );
 
     // Add stock status
-    const medicinesWithStatus = lowStockMedicines.map(medicine => ({
-      ...medicine,
-      stockStatus: 'LOW' as const,
-    }));
+    const medicinesWithStatus = lowStockMedicines.map(medicine =>
+      decorateMedicinePack({
+        ...medicine,
+        stockStatus: 'LOW' as const,
+      }),
+    );
 
     res.json({
       success: true,
@@ -1046,11 +1115,7 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
           continue;
         }
         if (!Number.isInteger(medicineData.stockQuantity) || medicineData.stockQuantity < 0) {
-          errors.push(`Row ${i + 2}: Skipped - Current quantity must be a whole number (0 or greater)`);
-          continue;
-        }
-        if (!medicineData.batchNumber?.trim()) {
-          errors.push(`Row ${i + 2}: Skipped - Missing batch number`);
+          errors.push(`Row ${i + 2}: Skipped - Strips x tablets per strip must be a whole number (0 or greater)`);
           continue;
         }
 
@@ -1083,9 +1148,10 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
           // Build update data object - REPLACE all fields with new values from import
           const updateData: any = {
             name: medicineData.name.trim(), // Always update name (required field)
-            batchNumber: medicineData.batchNumber.trim(),
+            batchNumber: medicineData.batchNumber?.trim() || existingMedicine.batchNumber,
             hospitalId: hospitalId, // Always include hospitalId
             isActive: true, // Always set to active when importing
+            tabletsPerStrip: medicineData.tabletsPerStrip ?? (existingMedicine as { tabletsPerStrip?: number | null }).tabletsPerStrip,
           };
 
           // Replace ALL fields with new values from import (even if empty/null)
@@ -1212,7 +1278,7 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
           const createData = {
             code: code,
             name: medicineData.name.trim(),
-            batchNumber: medicineData.batchNumber.trim(),
+            batchNumber: medicineData.batchNumber?.trim() || null,
             genericName: medicineData.genericName,
             manufacturer: medicineData.manufacturer,
             category: medicineData.category || 'General',
@@ -1220,6 +1286,7 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
             atcCode: medicineData.atcCode,
             price: priceToSave,
             stockQuantity: medicineData.stockQuantity || 0,
+            tabletsPerStrip: medicineData.tabletsPerStrip ?? null,
             lowStockThreshold: medicineData.lowStockThreshold || 10,
             expiryDate: medicineData.expiryDate,
             isActive: true,
@@ -1227,7 +1294,7 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
           };
 
           savedMedicine = await prisma.medicineCatalog.create({
-            data: createData
+            data: createData as any
           });
 
           // Verify the create was successful
@@ -1264,52 +1331,7 @@ export const importMedicineCatalog = async (req: AuthRequest, res: Response) => 
       }
     }
 
-    // Second pass: Delete medicines that are NOT in the import file (full replace mode)
-    // Only delete medicines that belong to this hospital
-    let deletedCount = 0;
-    try {
-      const allHospitalMedicines = await prisma.medicineCatalog.findMany({
-        where: {
-          hospitalId: hospitalId,
-          isActive: true
-        },
-        select: {
-          id: true,
-          name: true
-        }
-      });
-
-      // Find medicines in database that are NOT in the import file
-      // Check both by name (case-insensitive) and by ID (in case name changed)
-      const medicinesToDelete = allHospitalMedicines.filter(medicine => {
-        const medicineNameLower = medicine.name.trim().toLowerCase();
-        const notInImportByName = !importedMedicineNames.has(medicineNameLower);
-        const notInImportById = !importedMedicineIds.has(medicine.id);
-        // Delete if not found by name AND not found by ID (in case it was updated)
-        return notInImportByName && notInImportById;
-      });
-
-      // Delete medicines not in import file
-      if (medicinesToDelete.length > 0) {
-        console.log(`Deleting ${medicinesToDelete.length} medicines not present in import file...`);
-        for (const medicineToDelete of medicinesToDelete) {
-          try {
-            await prisma.medicineCatalog.update({
-              where: { id: medicineToDelete.id },
-              data: { isActive: false } // Soft delete by setting isActive to false
-            });
-            deletedCount++;
-            console.log(`Deleted medicine: ${medicineToDelete.name} (ID: ${medicineToDelete.id})`);
-          } catch (deleteError: any) {
-            console.error(`Failed to delete medicine ${medicineToDelete.name}:`, deleteError);
-            errors.push(`Failed to delete medicine "${medicineToDelete.name}": ${deleteError.message}`);
-          }
-        }
-      }
-    } catch (deleteError: any) {
-      console.error('Error during cleanup of medicines not in import file:', deleteError);
-      errors.push(`Warning: Could not delete medicines not in import file: ${deleteError.message}`);
-    }
+    const deletedCount = 0;
 
     // Clean up uploaded file
     if (filePath && fs.existsSync(filePath)) {

@@ -10,7 +10,7 @@ import AppUpdatePanel from './AppUpdatePanel';
 // Type for API response
 type ApiHospitalConfig = any;
 
-type TabType = 'profile' | 'bank' | 'updates';
+type TabType = 'profile' | 'bank' | 'updates' | 'backup';
 
 interface ConfigurationManagementProps {
   user: any;
@@ -762,6 +762,18 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user,
                   }`}
               >
                 App updates
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'backup'}
+                onClick={() => setActiveTab('backup')}
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'backup'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+              >
+                Backup
               </button>
             </nav>
           </div>
@@ -1617,6 +1629,44 @@ const ConfigurationManagement: React.FC<ConfigurationManagementProps> = ({ user,
         {activeTab === 'updates' && (
           <div className="space-y-6">
             <AppUpdatePanel />
+          </div>
+        )}
+
+        {activeTab === 'backup' && (
+          <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900">Backup hospital settings</h2>
+            <p className="text-sm text-gray-600">
+              Download the current hospital configuration as a JSON file. This is a settings export, not a full database dump.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  const payload = {
+                    exportedAt: new Date().toISOString(),
+                    hospitalConfig: config,
+                  };
+                  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  const stamp = new Date().toISOString().slice(0, 10);
+                  link.href = url;
+                  link.download = `zenhosp-hospital-config-${stamp}.json`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  URL.revokeObjectURL(url);
+                  setSuccess('Hospital configuration downloaded.');
+                  setError('');
+                } catch (backupError) {
+                  setError('Could not download hospital configuration.');
+                  setSuccess('');
+                }
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Download configuration
+            </button>
           </div>
         )}
       </div>

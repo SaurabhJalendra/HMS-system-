@@ -13,6 +13,8 @@ import ProfitLossPanel from './ProfitLossPanel';
 import billingService from '../../lib/api/services/billingService';
 import { formatPatientNamePhone } from '../../lib/utils/patientDisplay';
 import { isAdminLevelRole } from '../../lib/utils/rolePermissions';
+import { fetchAllPages } from '../../lib/utils/fetchAllPages';
+import { unitsForBillLine } from '../../lib/utils/prescriptionDispenseUnits';
 import type { Patient } from '../../lib/api/types';
 
 const PATIENT_SEARCH_LIMIT = 50;
@@ -298,8 +300,10 @@ const BillingManagement = ({ user, initialAction }: { user?: any; isAuthenticate
 
       // Consultations
       try {
-        const c = await consultationService.getConsultations({ patientId: selectedPatientId, page: 1, limit: 500 });
-        const consultations = c?.consultations || [];
+        const consultations = await fetchAllPages(async (page, limit) => {
+          const c = await consultationService.getConsultations({ patientId: selectedPatientId, page, limit });
+          return { items: c?.consultations || [], totalPages: c?.pagination?.totalPages };
+        });
         consultations.forEach((x) => {
           const consDate = x.consultationDate || x.createdAt || new Date().toISOString();
           if (!inDateRange(consDate)) return;
@@ -326,8 +330,10 @@ const BillingManagement = ({ user, initialAction }: { user?: any; isAuthenticate
 
       // Lab tests — API uses priceSnapshot / testNameSnapshot, not price / testName
       try {
-        const lt = await labTestService.getLabTests({ patientId: selectedPatientId, page: 1, limit: 500 });
-        const labTests = lt?.labTests || lt?.tests || [];
+        const labTests = await fetchAllPages(async (page, limit) => {
+          const lt = await labTestService.getLabTests({ patientId: selectedPatientId, page, limit });
+          return { items: lt?.labTests || lt?.tests || [], totalPages: lt?.pagination?.totalPages };
+        });
         labTests.forEach((t) => {
           const testDate = t.createdAt || t.completedAt || t.updatedAt || new Date().toISOString();
           if (!inDateRange(testDate)) return;
@@ -355,12 +361,14 @@ const BillingManagement = ({ user, initialAction }: { user?: any; isAuthenticate
 
       // Prescriptions — API returns prescriptionItems (+ medicine), not items
       try {
-        const presRes = await prescriptionService.getPrescriptions({
-          patientId: selectedPatientId,
-          page: 1,
-          limit: 500
+        const prescriptions = await fetchAllPages(async (page, limit) => {
+          const presRes = await prescriptionService.getPrescriptions({
+            patientId: selectedPatientId,
+            page,
+            limit,
+          });
+          return { items: presRes?.prescriptions || [], totalPages: presRes?.pagination?.totalPages };
         });
-        const prescriptions = presRes?.prescriptions || [];
         prescriptions.forEach((pres) => {
           const presDate = pres.createdAt || pres.updatedAt || new Date().toISOString();
           if (!inDateRange(presDate)) return;
@@ -370,7 +378,11 @@ const BillingManagement = ({ user, initialAction }: { user?: any; isAuthenticate
             lineItems.forEach((item, idx) => {
               const medName = item.medicine?.name || item.medicineName || 'Medicine';
               const medPrice = Number(item.medicine?.price ?? item.unitPrice ?? item.price ?? 0);
-              const qty = Number(item.quantity ?? 1);
+              const qty = unitsForBillLine({
+                quantity: Number(item.quantity ?? 1),
+                frequency: item.frequency,
+                duration: Number(item.duration ?? 1),
+              });
               const amount = medPrice * qty;
               const rxLabel = pres.prescriptionNumber ? ` [${pres.prescriptionNumber}]` : '';
               newSections.pharmacy.items.push({
@@ -1199,8 +1211,14 @@ const BillingManagement = ({ user, initialAction }: { user?: any; isAuthenticate
               {/* Section Subtotal */}
               <div className="mt-4 pt-4 border-t border-gray-200 flex justify-end">
                 <div className="text-right">
-                  <span className="text-sm text-gray-600">Section Subtotal: </span>
-                  <span className="text-lg font-bold">{formatCurrency(sections[activeSection].subtotal)}</span>
+                  <span className="text-sm text-gray-600">Selected in this section: </span>
+                  <span className="text-lg font-bold">
+                    {formatCurrency(
+                      sections[activeSection].items
+                        .filter((item) => selectedIds.has(item.id))
+                        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+                    )}
+                  </span>
                 </div>
               </div>
             </>

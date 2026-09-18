@@ -3,6 +3,7 @@ import { PrismaClient, ExpenseCategory, PaymentStatus } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { logAudit } from '../utils/auditLogger';
+import { parseLocalDateInput, parseLocalDayEnd, parseLocalDayStart } from '../utils/financeCash';
 
 const prisma = new PrismaClient();
 
@@ -41,8 +42,8 @@ const salaryBulkUpsertSchema = z.object({
 
 function monthRange(month: string) {
   const [y, m] = month.split('-').map(Number);
-  const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0));
+  const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
+  const end = new Date(y, m, 1, 0, 0, 0, 0);
   return { start, end };
 }
 
@@ -55,7 +56,7 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
         category: data.category,
         description: data.description,
         amount: data.amount,
-        expenseDate: data.expenseDate ? new Date(data.expenseDate) : new Date(),
+        expenseDate: data.expenseDate ? parseLocalDateInput(data.expenseDate) : new Date(),
         paymentStatus: data.paymentStatus ?? PaymentStatus.PENDING,
         paidAt: data.paidAt ? new Date(data.paidAt) : (data.paymentStatus === PaymentStatus.PAID ? new Date() : null),
         userId: data.userId || null,
@@ -102,12 +103,8 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
     if (userId) where.userId = userId;
     if (from || to) {
       where.expenseDate = {};
-      if (from) where.expenseDate.gte = new Date(from);
-      if (to) {
-        const toEnd = new Date(to);
-        toEnd.setHours(23, 59, 59, 999);
-        where.expenseDate.lte = toEnd;
-      }
+      if (from) where.expenseDate.gte = parseLocalDayStart(from);
+      if (to) where.expenseDate.lte = parseLocalDayEnd(to);
     }
 
     const [expenses, total] = await Promise.all([
@@ -163,7 +160,7 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
         ...(data.category ? { category: data.category } : {}),
         ...(data.description !== undefined ? { description: data.description as any } : {}),
         ...(data.amount !== undefined ? { amount: data.amount as any } : {}),
-        ...(data.expenseDate ? { expenseDate: new Date(data.expenseDate) } : {}),
+        ...(data.expenseDate ? { expenseDate: parseLocalDateInput(data.expenseDate) } : {}),
         ...(data.paymentStatus ? { paymentStatus: data.paymentStatus } : {}),
         ...(data.paidAt !== undefined ? { paidAt: data.paidAt ? new Date(data.paidAt) : null } : {}),
         ...(data.userId !== undefined ? { userId: data.userId || null } : {}),
@@ -228,6 +225,9 @@ export const upsertMonthlySalaries = async (req: AuthRequest, res: Response) => 
     const expenses = await prisma.$transaction(async (tx) => {
       const out: any[] = [];
       for (const it of items) {
+        if (Number(it.amount) <= 0 && !it.paymentStatus) {
+          continue;
+        }
         const existing = await tx.expense.findFirst({
           where: {
             category: ExpenseCategory.SALARY,
@@ -244,7 +244,7 @@ export const upsertMonthlySalaries = async (req: AuthRequest, res: Response) => 
               data: {
                 amount: it.amount,
                 description: `Salary for ${month}`,
-                paymentStatus: it.paymentStatus ?? existing.paymentStatus,
+                paymentStatus: it.paymentStatus ?? existing.paymentStatus ?? PaymentStatus.PENDING,
                 expenseDate: start,
                 paidAt: (it.paymentStatus ?? existing.paymentStatus) === PaymentStatus.PAID ? new Date() : existing.paidAt,
               },
@@ -253,7 +253,7 @@ export const upsertMonthlySalaries = async (req: AuthRequest, res: Response) => 
               },
             })
           );
-        } else {
+        } else if (Number(it.amount) > 0) {
           out.push(
             await tx.expense.create({
               data: {
@@ -262,8 +262,8 @@ export const upsertMonthlySalaries = async (req: AuthRequest, res: Response) => 
                 description: `Salary for ${month}`,
                 amount: it.amount,
                 expenseDate: start,
-                paymentStatus: it.paymentStatus ?? PaymentStatus.PAID,
-                paidAt: (it.paymentStatus ?? PaymentStatus.PAID) === PaymentStatus.PAID ? new Date() : null,
+                paymentStatus: it.paymentStatus ?? PaymentStatus.PENDING,
+                paidAt: (it.paymentStatus ?? PaymentStatus.PENDING) === PaymentStatus.PAID ? new Date() : null,
                 createdBy: req.user!.id,
               },
               include: {

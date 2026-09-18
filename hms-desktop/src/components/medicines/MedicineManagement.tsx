@@ -8,6 +8,7 @@ import ImportCatalogWizard from './ImportCatalogWizard';
 import { useHospitalConfig } from '../../lib/contexts/HospitalConfigContext';
 import { formatCurrencySync } from '../../lib/utils/currencyAndTimezone';
 import { autoSelectIfZero, autoSelectIfZeroMouseDown } from '../../lib/utils/numberInput';
+import { packDisplayOf, tabletsFromStrips } from '../../lib/utils/medicinePack';
 
 const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) => {
   const { formatCurrency, config, displayCurrency, baseCurrency, refreshConfig } = useHospitalConfig();
@@ -189,6 +190,8 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
   const [stockUpdateForm, setStockUpdateForm] = useState({
     operation: 'add',
     quantity: '',
+    strips: '',
+    tabletsPerStrip: '',
     reason: ''
   });
   const [showEditModal, setShowEditModal] = useState(false);
@@ -196,6 +199,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
   const [editFormData, setEditFormData] = useState({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [medicineToDelete, setMedicineToDelete] = useState(null);
+  const [catalogCategories, setCatalogCategories] = useState([]);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -204,6 +208,8 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
     category: '',
     price: '',
     quantity: '',
+    strips: '',
+    tabletsPerStrip: '',
     lowStockThreshold: '',
     code: '',
     description: '',
@@ -274,6 +280,9 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
           return;
         }
         setMedicines(response.data.medicines);
+        if (Array.isArray(response.data.categories) && response.data.categories.length > 0) {
+          setCatalogCategories(response.data.categories);
+        }
         setTotalPages(nextTotalPages);
       }
     } catch (err: any) {
@@ -294,7 +303,19 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await medicineService.createMedicine(formData);
+      const stripsNum = parseInt(String(formData.strips).trim(), 10);
+      const perStripNum = parseInt(String(formData.tabletsPerStrip).trim(), 10);
+      if (!Number.isInteger(stripsNum) || stripsNum < 0 || !Number.isInteger(perStripNum) || perStripNum < 1) {
+        setError('Enter number of strips and how many tablets are in one strip.');
+        setLoading(false);
+        return;
+      }
+      const response = await medicineService.createMedicine({
+        ...formData,
+        strips: stripsNum,
+        tabletsPerStrip: perStripNum,
+        quantity: tabletsFromStrips(stripsNum, perStripNum),
+      });
       if (response.success) {
         setShowAddForm(false);
         setFormData({
@@ -304,6 +325,8 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
           category: '',
           price: '',
           quantity: '',
+          strips: '',
+          tabletsPerStrip: '',
           lowStockThreshold: '',
           code: '',
           description: '',
@@ -392,6 +415,8 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
     setStockUpdateForm({
       operation: 'add',
       quantity: '',
+      strips: '',
+      tabletsPerStrip: medicine.tabletsPerStrip || '',
       reason: ''
     });
     setShowStockUpdateModal(true);
@@ -401,9 +426,13 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
     e.preventDefault();
     if (!selectedMedicine) return;
 
-    const qty = parseInt(String(stockUpdateForm.quantity).trim(), 10);
+    const stripsNum = parseInt(String(stockUpdateForm.strips).trim(), 10);
+    const perStripNum = parseInt(String(stockUpdateForm.tabletsPerStrip || selectedMedicine.tabletsPerStrip || '').trim(), 10);
+    const qty = Number.isInteger(stripsNum) && Number.isInteger(perStripNum) && perStripNum >= 1
+      ? tabletsFromStrips(stripsNum, perStripNum)
+      : parseInt(String(stockUpdateForm.quantity).trim(), 10);
     if (!Number.isFinite(qty) || qty < 0 || !Number.isInteger(qty)) {
-      setError('Please enter a valid whole number (0 or greater).');
+      setError('Enter strips and tablets per strip, or a tablet quantity of 0 or greater.');
       return;
     }
     if (stockUpdateForm.operation !== 'set' && qty < 1) {
@@ -417,13 +446,15 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
       const response = await medicineService.updateStock(selectedMedicine.id, {
         operation: stockUpdateForm.operation,
         quantity: qty,
+        strips: Number.isInteger(stripsNum) ? stripsNum : undefined,
+        tabletsPerStrip: Number.isInteger(perStripNum) ? perStripNum : undefined,
         reason: stockUpdateForm.reason || undefined
       });
 
       if (response.success) {
         setShowStockUpdateModal(false);
         setSelectedMedicine(null);
-        setStockUpdateForm({ operation: 'add', quantity: '', reason: '' });
+        setStockUpdateForm({ operation: 'add', quantity: '', strips: '', tabletsPerStrip: '', reason: '' });
         // Reload all inventory data
         await loadInventoryData();
         await loadMedicines();
@@ -464,7 +495,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
       therapeuticClass: medicine.therapeuticClass || '',
       atcCode: medicine.atcCode || '',
       price: medicine.price || medicine.sellingPrice || 0,
-      quantity: medicine.stockQuantity || medicine.quantity || 0,
+      tabletsPerStrip: medicine.tabletsPerStrip || '',
       lowStockThreshold: medicine.lowStockThreshold || 10,
       expiryDate: medicine.expiryDate || '',
       code: medicine.code || ''
@@ -486,19 +517,21 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
     if (!editingMedicine) return;
 
     const priceNum = parseFloat(String(editFormData.price ?? '').replace(/,/g, ''));
-    const qtyNum = parseInt(String(editFormData.quantity ?? '').trim(), 10);
+    const perStripNum = editFormData.tabletsPerStrip === '' || editFormData.tabletsPerStrip == null
+      ? undefined
+      : parseInt(String(editFormData.tabletsPerStrip).trim(), 10);
     const thresholdNum = parseInt(String(editFormData.lowStockThreshold ?? '').trim(), 10);
 
     if (!editFormData.name || !String(editFormData.name).trim()) {
       setError('Medicine name is required.');
       return;
     }
-    if (!Number.isFinite(priceNum) || priceNum <= 0) {
-      setError('Price must be a number greater than zero.');
+    if (!Number.isFinite(priceNum) || priceNum < 0) {
+      setError('Price must be a number of 0 or greater.');
       return;
     }
-    if (!Number.isFinite(qtyNum) || qtyNum < 0 || !Number.isInteger(qtyNum)) {
-      setError('Stock quantity must be a whole number (0 or greater).');
+    if (perStripNum !== undefined && (!Number.isInteger(perStripNum) || perStripNum < 1)) {
+      setError('Tablets per strip must be a whole number of 1 or greater.');
       return;
     }
     if (!Number.isFinite(thresholdNum) || thresholdNum < 0 || !Number.isInteger(thresholdNum)) {
@@ -517,7 +550,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
         therapeuticClass: editFormData.therapeuticClass?.trim() || undefined,
         atcCode: editFormData.atcCode?.trim() || undefined,
         price: priceNum,
-        quantity: qtyNum,
+        tabletsPerStrip: perStripNum,
         lowStockThreshold: thresholdNum,
         expiryDate: editFormData.expiryDate?.trim() || undefined,
         code: editFormData.code?.trim() || undefined
@@ -707,7 +740,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
       // Search and Filters
       React.createElement(
         'div',
-        { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '8px', backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: '6px 8px' } },
+        { style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '8px', backgroundColor: '#FFFFFF', border: '1px solid #C8C8C8', padding: '6px 8px' } },
         React.createElement(
           'input',
           {
@@ -738,10 +771,14 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
             style: { padding: '4px 8px', border: '1px solid #C8C8C8', borderRadius: '2px', fontSize: '13px', backgroundColor: '#FFFFFF', boxShadow: 'inset 0 1px 2px 0 rgba(0, 0, 0, 0.05)' }
           },
           React.createElement('option', { value: '' }, 'All Categories'),
-          React.createElement('option', { value: 'Antibiotic' }, 'Antibiotic'),
-          React.createElement('option', { value: 'Painkiller' }, 'Painkiller'),
-          React.createElement('option', { value: 'Vitamin' }, 'Vitamin'),
-          React.createElement('option', { value: 'Other' }, 'Other')
+          ...(catalogCategories.length > 0
+            ? catalogCategories.map((category) => React.createElement('option', { key: category, value: category }, category))
+            : [
+                React.createElement('option', { value: 'Antibiotic' }, 'Antibiotic'),
+                React.createElement('option', { value: 'Painkiller' }, 'Painkiller'),
+                React.createElement('option', { value: 'Vitamin' }, 'Vitamin'),
+                React.createElement('option', { value: 'Other' }, 'Other'),
+              ])
         ),
         React.createElement(
           'button',
@@ -772,6 +809,26 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
             }
           },
           'Search'
+        ),
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => {
+              setShowAddForm(true);
+              setError('');
+            },
+            style: {
+              backgroundColor: '#2563EB',
+              color: '#FFFFFF',
+              border: '1px solid #1D4ED8',
+              padding: '4px 12px',
+              borderRadius: '2px',
+              fontSize: '13px',
+              cursor: 'pointer'
+            }
+          },
+          'Add Medicine'
         )
       ),
 
@@ -792,8 +849,9 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Generic Name'),
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Category'),
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Price'),
-                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Stock'),
-                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Status')
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Stock (strips-tablets)'),
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Status'),
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider' }, 'Actions')
               )
             ),
             React.createElement(
@@ -850,7 +908,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                       return formatted;
                     })()
                   ),
-                  React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, medicine.stockQuantity || medicine.quantity || 0),
+                  React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, packDisplayOf(medicine)),
                   React.createElement(
                     'td',
                     { className: 'px-6 py-4 whitespace-nowrap text-sm' },
@@ -858,6 +916,29 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                       'span',
                       { className: `px-2 py-1 text-xs font-medium rounded-full ${stockStatus === 'LOW' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}` },
                       stockStatus
+                    )
+                  ),
+                  React.createElement(
+                    'td',
+                    { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium' },
+                    React.createElement(
+                      'div',
+                      { className: 'flex space-x-3' },
+                      React.createElement(
+                        'button',
+                        { onClick: () => handleEdit(medicine), className: 'text-teal-600 hover:text-teal-900' },
+                        'Edit'
+                      ),
+                      React.createElement(
+                        'button',
+                        { onClick: () => handleOpenStockUpdate(medicine), className: 'text-blue-600 hover:text-blue-900' },
+                        'Update Stock'
+                      ),
+                      React.createElement(
+                        'button',
+                        { onClick: () => handleDelete(medicine), className: 'text-red-600 hover:text-red-900' },
+                        'Deactivate'
+                      )
                     )
                   )
                 );
@@ -963,7 +1044,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2' },
-                  'Generic Name (Salt) *',
+                  'Generic Name (Salt)',
                   React.createElement(InfoButton, {
                     title: 'Generic Name / Salt',
                     content: 'Enter the generic/salt name of the medicine (e.g., "Paracetamol", "Acetaminophen"). This is the active pharmaceutical ingredient.',
@@ -973,7 +1054,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement('input', {
                   type: 'text',
                   name: 'genericName',
-                  required: true,
+                  required: false,
                   value: formData.genericName,
                   onChange: handleInputChange,
                   className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
@@ -985,12 +1066,12 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2' },
-                  'Manufacturer *'
+                  'Manufacturer'
                 ),
                 React.createElement('input', {
                   type: 'text',
                   name: 'manufacturer',
-                  required: true,
+                  required: false,
                   value: formData.manufacturer,
                   onChange: handleInputChange,
                   className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
@@ -1002,13 +1083,13 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2' },
-                  'Category *'
+                  'Category'
                 ),
                 React.createElement(
                   'select',
                   {
                     name: 'category',
-                    required: true,
+                    required: false,
                     value: formData.category,
                     onChange: handleInputChange,
                     className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
@@ -1046,12 +1127,12 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2' },
-                  'Price *'
+                  'Price'
                 ),
                 React.createElement('input', {
                   type: 'number',
                   name: 'price',
-                  required: true,
+                  required: false,
                   min: '0',
                   step: '0.01',
                   value: formData.price,
@@ -1067,14 +1148,14 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2' },
-                  'Stock Quantity *'
+                  'Number of strips *'
                 ),
                 React.createElement('input', {
                   type: 'number',
-                  name: 'quantity',
+                  name: 'strips',
                   required: true,
                   min: '0',
-                  value: formData.quantity,
+                  value: formData.strips,
                   onChange: handleInputChange,
                   onFocus: autoSelectIfZero,
                   onMouseDown: autoSelectIfZeroMouseDown,
@@ -1087,12 +1168,32 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement(
                   'label',
                   { className: 'block text-sm font-medium text-gray-700 mb-2' },
-                  'Low Stock Alert *'
+                  'Tablets in one strip *'
+                ),
+                React.createElement('input', {
+                  type: 'number',
+                  name: 'tabletsPerStrip',
+                  required: true,
+                  min: '1',
+                  value: formData.tabletsPerStrip,
+                  onChange: handleInputChange,
+                  onFocus: autoSelectIfZero,
+                  onMouseDown: autoSelectIfZeroMouseDown,
+                  className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+                })
+              ),
+              React.createElement(
+                'div',
+                null,
+                React.createElement(
+                  'label',
+                  { className: 'block text-sm font-medium text-gray-700 mb-2' },
+                  'Low Stock Alert'
                 ),
                 React.createElement('input', {
                   type: 'number',
                   name: 'lowStockThreshold',
-                  required: true,
+                  required: false,
                   min: '0',
                   value: formData.lowStockThreshold,
                   onChange: handleInputChange,
@@ -1217,7 +1318,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 'tr',
                 { key: medicine.id, className: 'hover:bg-gray-50' },
                 React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900' }, medicine.name),
-                React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-red-600 font-semibold' }, medicine.quantity),
+                React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-red-600 font-semibold' }, packDisplayOf(medicine)),
                 React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, medicine.lowStockThreshold),
                 React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, 
                   (() => {
@@ -1247,6 +1348,14 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                         className: 'text-blue-600 hover:text-blue-900'
                       },
                       'Update Stock'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        onClick: () => handleDelete(medicine),
+                        className: 'text-red-600 hover:text-red-900'
+                      },
+                      'Deactivate'
                     )
                   )
                 )
@@ -1255,7 +1364,12 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
           ) : React.createElement(
             'div',
             { className: 'px-6 py-8 text-center text-gray-500' },
-            '✅ No low stock items. All medicines are well stocked!'
+            React.createElement('p', { className: 'mb-3' }, 'No low stock items. All medicines are well stocked.'),
+            React.createElement(
+              'p',
+              { className: 'text-sm' },
+              'Use the All medicines table below to edit or update stock for items that are not on this alert list.'
+            )
           )
         )
       ),
@@ -1340,7 +1454,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                   { key: medicine.id, className: 'hover:bg-gray-50' },
                   React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900' }, medicine.name),
                   React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, medicine.category || '-'),
-                  React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-900' }, stockQuantity),
+                  React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-900' }, packDisplayOf(medicine)),
                   React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, lowStockThreshold),
                   React.createElement(
                     'td',
@@ -1372,6 +1486,14 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                           className: 'text-blue-600 hover:text-blue-900'
                         },
                         'Update Stock'
+                      ),
+                      React.createElement(
+                        'button',
+                        {
+                          onClick: () => handleDelete(medicine),
+                          className: 'text-red-600 hover:text-red-900'
+                        },
+                        'Deactivate'
                       )
                     )
                   )
@@ -1433,7 +1555,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
             React.createElement(
               'p',
               { className: 'text-sm text-gray-500 mb-4' },
-              `Current stock: ${selectedMedicine.stockQuantity ?? selectedMedicine.quantity ?? 0} | Low-stock threshold: ${selectedMedicine.lowStockThreshold ?? 10}`
+              `Current stock: ${packDisplayOf(selectedMedicine)} | Low-stock threshold: ${selectedMedicine.lowStockThreshold ?? 10}`
             ),
             React.createElement(
               'form',
@@ -1459,14 +1581,30 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
               React.createElement(
                 'div',
                 null,
-                React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Quantity *'),
+                React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Number of strips *'),
                 React.createElement('input', {
                   type: 'number',
-                  name: 'quantity',
-                  value: stockUpdateForm.quantity,
+                  name: 'strips',
+                  value: stockUpdateForm.strips,
                   onChange: handleStockUpdateFormChange,
-                onFocus: autoSelectIfZero,
-                onMouseDown: autoSelectIfZeroMouseDown,
+                  onFocus: autoSelectIfZero,
+                  onMouseDown: autoSelectIfZeroMouseDown,
+                  required: true,
+                  min: '0',
+                  className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500'
+                })
+              ),
+              React.createElement(
+                'div',
+                null,
+                React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Tablets in one strip *'),
+                React.createElement('input', {
+                  type: 'number',
+                  name: 'tabletsPerStrip',
+                  value: stockUpdateForm.tabletsPerStrip,
+                  onChange: handleStockUpdateFormChange,
+                  onFocus: autoSelectIfZero,
+                  onMouseDown: autoSelectIfZeroMouseDown,
                   required: true,
                   min: '1',
                   className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500'
@@ -1539,8 +1677,8 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Date'),
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Medicine'),
                 React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Quantity'),
-                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Patient'),
-                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Dispensed By')
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'Patient / reason'),
+                React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase' }, 'By')
               )
             ),
             React.createElement(
@@ -1552,7 +1690,7 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
                 React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, new Date(transaction.dispensedAt).toLocaleDateString()),
                 React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900' }, transaction.medicine?.name || 'N/A'),
                 React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, transaction.quantityDispensed),
-                React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, transaction.prescription?.patient?.name || 'N/A'),
+                React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, transaction.prescription?.patient?.name || transaction.reason || transaction.adjustmentType || 'Stock adjustment'),
                 React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-500' }, transaction.dispensedByUser?.fullName || 'N/A')
               ))
             )
@@ -1815,15 +1953,15 @@ const MedicineManagement = ({ user, isAuthenticated, onBack, initialAction }) =>
             React.createElement(
               'div',
               null,
-              React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, 'Stock Quantity'),
+              React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, 'Tablets in one strip'),
               React.createElement('input', {
                 type: 'number',
-                name: 'quantity',
-                value: editFormData.quantity || 0,
+                name: 'tabletsPerStrip',
+                value: editFormData.tabletsPerStrip || '',
                 onChange: handleEditInputChange,
                 onFocus: autoSelectIfZero,
                 onMouseDown: autoSelectIfZeroMouseDown,
-                min: 0,
+                min: 1,
                 className: 'w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
               })
             ),

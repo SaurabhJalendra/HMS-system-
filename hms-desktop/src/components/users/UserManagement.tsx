@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import userService from '../../lib/api/services/userService';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { canManageUsers, getRoleDisplayInfo, roleUsesConsultationFee } from '../../lib/utils/rolePermissions';
+import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
 import { UserRole } from '../../lib/api/types';
 import InfoButton from '../common/InfoButton';
 import { getInfoContent } from '../../lib/infoContent';
@@ -66,13 +67,15 @@ const formatUserConsultationFee = (user) => {
   return `₹${n.toFixed(2)}`;
 };
 
-const UserManagement = ({ user: currentUser, isAuthenticated }) => {
+const UserManagement = ({ user: currentUser, isAuthenticated, initialAction = null }) => {
   const [users, setUsers] = useState([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [showAddForm, setShowAddForm] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(initialAction === 'addUser');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [showPasswordReset, setShowPasswordReset] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState('');
@@ -88,6 +91,7 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
   const [showResetNewPassword, setShowResetNewPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
   const usernameInputRef = useRef(null);
+  const debouncedSearch = useDebouncedValue(searchTerm, 350);
 
   // Get all roles with their display info
   const roles = Object.values(UserRole).map(roleValue => {
@@ -125,6 +129,22 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
     }
   }, [showAddForm]);
 
+  useEffect(() => {
+    if (initialAction === 'addUser') {
+      setShowAddForm(true);
+    }
+  }, [initialAction]);
+
+  useEffect(() => {
+    if (initialLoading) return;
+    setCurrentPage(1);
+  }, [debouncedSearch, filterRole, filterStatus]);
+
+  useEffect(() => {
+    if (initialLoading) return;
+    loadUsers();
+  }, [currentPage, debouncedSearch, filterRole, filterStatus]);
+
   const loadInitialData = async () => {
     try {
       setInitialLoading(true);
@@ -139,16 +159,23 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
     }
   };
 
-  const loadUsers = async () => {
+  const loadUsers = async (page = currentPage) => {
     try {
       setError('');
       const response = await userService.getUsers({
-        search: searchTerm,
+        search: debouncedSearch || searchTerm,
         role: filterRole || undefined,
-        isActive: filterStatus === 'active' ? true : filterStatus === 'inactive' ? false : undefined
+        isActive: filterStatus === 'active' ? true : filterStatus === 'inactive' ? false : undefined,
+        page,
+        limit: 20,
       });
       if (response.users) {
         setUsers(response.users || []);
+        const nextTotalPages = Math.max(1, response.pagination?.totalPages || 1);
+        setTotalPages(nextTotalPages);
+        if (page > nextTotalPages) {
+          setCurrentPage(nextTotalPages);
+        }
       } else {
         setError('Failed to load users');
       }
@@ -168,7 +195,8 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
   };
 
   const handleSearch = () => {
-    loadUsers();
+    setCurrentPage(1);
+    loadUsers(1);
   };
 
   const handleToggleAddForm = () => {
@@ -998,6 +1026,35 @@ const UserManagement = ({ user: currentUser, isAuthenticated }) => {
               );
             })
           )
+        )
+      ),
+      totalPages > 1 && React.createElement(
+        'div',
+        { className: 'mt-4 flex items-center justify-between border-t border-gray-200 px-6 pb-4 pt-4' },
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => setCurrentPage((page) => Math.max(1, page - 1)),
+            disabled: currentPage === 1,
+            className: 'px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+          },
+          'Previous'
+        ),
+        React.createElement(
+          'span',
+          { className: 'text-sm text-gray-700' },
+          `Page ${currentPage} of ${totalPages}`
+        ),
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => setCurrentPage((page) => Math.min(totalPages, page + 1)),
+            disabled: currentPage >= totalPages,
+            className: 'px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+          },
+          'Next'
         )
       )
     ),

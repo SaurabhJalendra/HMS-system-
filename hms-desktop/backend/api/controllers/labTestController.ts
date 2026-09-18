@@ -1,8 +1,21 @@
 import { Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { logAudit } from '../utils/auditLogger';
 import { PrismaClient, LabTestStatus, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
+import {
+  applyLabListScope,
+  assertCategoryEnabled,
+  assertLabModuleEnabled,
+  assertOwnTechnicianId,
+  canAccessLabTestRecord,
+  capLimit,
+  getTechnicianAssignedIds,
+  isAllLabType,
+  mapCategoryToLabType,
+} from '../utils/labTestAccess';
 
 const prisma = new PrismaClient();
 
@@ -47,7 +60,6 @@ const labTestUpdateSchema = z.object({
   status: z.nativeEnum(LabTestStatus).optional(),
   scheduledDate: z.string().optional(),
   results: z.string().optional(),
-  reportFile: z.string().optional(),
   notes: z.string().optional(),
   performedBy: z.string().optional(),
 });
@@ -59,8 +71,9 @@ const labTestSearchSchema = z.object({
   status: z.nativeEnum(LabTestStatus).optional(),
   testCatalogId: z.string().optional(),
   category: z.string().optional(),
-  page: z.string().transform(val => parseInt(val) || 1).optional(),
-  limit: z.string().transform(val => parseInt(val) || 20).optional(),
+  search: z.string().optional(),
+  page: z.coerce.number().min(1).optional().default(1),
+  limit: z.coerce.number().min(1).max(100).optional().default(20),
 });
 
 // Test catalog validation schemas
@@ -111,14 +124,17 @@ const technicianTestSelectionSchema = z.object({
   ),
   labType: z.string()
     .min(1, 'Lab type is required')
-    .refine((val) => ['General', 'MRI', 'CT Scan', 'X-Ray', 'Ultrasound', 'Pathology'].includes(val), {
-      message: 'Lab type must be one of: General, MRI, CT Scan, X-Ray, Ultrasound, Pathology',
+    .refine((val) => ['ALL', 'ALL TESTS', 'General', 'MRI', 'CT Scan', 'X-Ray', 'Ultrasound', 'Pathology'].includes(val), {
+      message: 'Lab type must be one of: ALL, General, MRI, CT Scan, X-Ray, Ultrasound, Pathology',
     }),
+  datapointsByTest: z.any().optional(),
+  pricesByTest: z.any().optional(),
 });
 
 // Create new lab test order
 export const createLabTest = async (req: AuthRequest, res: Response) => {
   try {
+    await assertLabModuleEnabled(prisma);
     const validatedData = labTestCreateSchema.parse(req.body);
 
     if (
@@ -162,6 +178,8 @@ export const createLabTest = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    await assertCategoryEnabled(prisma, testCatalog.category);
+
     // Verify ordering user exists and has appropriate role
     const orderingUser = await prisma.user.findUnique({
       where: { 
@@ -174,6 +192,13 @@ export const createLabTest = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({
         success: false,
         message: 'Ordering user not found or inactive',
+      });
+    }
+
+    if (orderingUser.role !== UserRole.DOCTOR) {
+      return res.status(400).json({
+        success: false,
+        message: 'Lab orders must be attributed to a doctor',
       });
     }
 
@@ -241,15 +266,18 @@ export const createLabTest = async (req: AuthRequest, res: Response) => {
     // Retrying a partially completed hold request must not create the same test
     // twice for one OPD visit. Unlinked/manual orders remain intentionally
     // repeatable because they have no visit identity.
-    const visitIdentity = consultationIdLink
-      ? { consultationId: consultationIdLink }
-      : appointmentIdLink
-        ? { appointmentId: appointmentIdLink }
-        : null;
+    const visitIdentity = consultationIdLink || appointmentIdLink
+      ? {
+          OR: [
+            ...(consultationIdLink ? [{ consultationId: consultationIdLink }] : []),
+            ...(appointmentIdLink ? [{ appointmentId: appointmentIdLink }] : []),
+          ],
+        }
+      : null;
 
     const result = await prisma.$transaction(async (tx) => {
       if (visitIdentity) {
-        const visitKey = consultationIdLink || appointmentIdLink!;
+        const visitKey = `${consultationIdLink || ''}:${appointmentIdLink || ''}`;
         // PostgreSQL transaction-level advisory locking closes the race between
         // the retry check and insert without requiring a risky data migration.
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`opd-lab:${visitKey}:${validatedData.testCatalogId}`}))`;
@@ -316,6 +344,14 @@ export const createLabTest = async (req: AuthRequest, res: Response) => {
         errors: error.issues,
       });
     }
+
+    const statusCode = (error as { statusCode?: number })?.statusCode;
+    if (statusCode) {
+      return res.status(statusCode).json({
+        success: false,
+        message: error instanceof Error ? error.message : 'Request rejected',
+      });
+    }
     
     console.error('Create lab test error:', error);
     res.status(500).json({
@@ -328,9 +364,20 @@ export const createLabTest = async (req: AuthRequest, res: Response) => {
 // Get all lab tests with search and pagination
 export const getLabTests = async (req: AuthRequest, res: Response) => {
   try {
-    const { patientId, orderedBy, performedBy, status, testCatalogId, category, page = 1, limit = 20 } = labTestSearchSchema.parse(req.query);
+    const {
+      patientId,
+      orderedBy,
+      performedBy,
+      status,
+      testCatalogId,
+      category,
+      search,
+      page = 1,
+      limit = 20,
+    } = labTestSearchSchema.parse(req.query);
+    const safeLimit = capLimit(limit);
     
-    const skip = (page - 1) * limit;
+    const skip = (page - 1) * safeLimit;
     
     // Build where clause
     const where: any = {};
@@ -361,12 +408,24 @@ export const getLabTests = async (req: AuthRequest, res: Response) => {
       };
     }
 
+    if (search && search.trim()) {
+      const term = search.trim();
+      where.OR = [
+        { testNameSnapshot: { contains: term, mode: 'insensitive' } },
+        { notes: { contains: term, mode: 'insensitive' } },
+        { patient: { name: { contains: term, mode: 'insensitive' } } },
+        { orderedByUser: { fullName: { contains: term, mode: 'insensitive' } } },
+      ];
+    }
+
+    const scopedWhere = await applyLabListScope(prisma, req, where);
+
     // Get lab tests with pagination
     const [labTests, total] = await Promise.all([
       prisma.labTest.findMany({
-        where,
+        where: scopedWhere,
         skip,
-        take: limit,
+        take: safeLimit,
         orderBy: { createdAt: 'desc' },
         include: {
           patient: {
@@ -405,10 +464,10 @@ export const getLabTests = async (req: AuthRequest, res: Response) => {
           },
         },
       }),
-      prisma.labTest.count({ where }),
+      prisma.labTest.count({ where: scopedWhere }),
     ]);
 
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = Math.ceil(total / safeLimit);
 
     res.json({
       success: true,
@@ -418,7 +477,7 @@ export const getLabTests = async (req: AuthRequest, res: Response) => {
           currentPage: page,
           totalPages,
           totalItems: total,
-          itemsPerPage: limit,
+          itemsPerPage: safeLimit,
           hasNextPage: page < totalPages,
           hasPrevPage: page > 1,
         },
@@ -487,6 +546,13 @@ export const getLabTestById = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (!(await canAccessLabTestRecord(prisma, req, labTest))) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have access to this lab test',
+      });
+    }
+
     res.json({
       success: true,
       data: { labTest },
@@ -518,19 +584,25 @@ export const updateLabTest = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (validatedData.status === 'CANCELLED') {
-      if (existingLabTest.status === 'COMPLETED') {
-        return res.status(400).json({
-          success: false,
-          message: 'Completed lab tests cannot be cancelled',
-        });
-      }
-      if (existingLabTest.status === 'CANCELLED') {
-        return res.status(400).json({
-          success: false,
-          message: 'Lab test is already cancelled',
-        });
-      }
+    if (!(await canAccessLabTestRecord(prisma, req, existingLabTest))) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update tests assigned to you',
+      });
+    }
+
+    if (existingLabTest.status === 'COMPLETED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Completed lab tests cannot be modified',
+      });
+    }
+
+    if (validatedData.status === 'CANCELLED' && existingLabTest.status === 'CANCELLED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Lab test is already cancelled',
+      });
     }
 
     // Prepare update data
@@ -541,8 +613,8 @@ export const updateLabTest = async (req: AuthRequest, res: Response) => {
       updateData.scheduledDate = new Date(validatedData.scheduledDate);
     }
     
-    // If status is being changed to COMPLETED, set completedAt and performedBy
-    if (validatedData.status === 'COMPLETED' && existingLabTest.status !== 'COMPLETED') {
+    // Completed tests already returned above, so this is a first-time completion.
+    if (validatedData.status === 'COMPLETED') {
       updateData.completedAt = new Date();
       // If performedBy is not provided, use the current user (lab technician)
       if (!validatedData.performedBy) {
@@ -617,6 +689,7 @@ export const updateLabTest = async (req: AuthRequest, res: Response) => {
 // Get lab test statistics
 export const getLabTestStats = async (req: AuthRequest, res: Response) => {
   try {
+    const scopedWhere = await applyLabListScope(prisma, req, {});
     const [
       totalLabTests,
       labTestsByStatus,
@@ -624,17 +697,20 @@ export const getLabTestStats = async (req: AuthRequest, res: Response) => {
       recentLabTests,
       labTestsByDoctorRaw,
     ] = await Promise.all([
-      prisma.labTest.count(),
+      prisma.labTest.count({ where: scopedWhere }),
       prisma.labTest.groupBy({
         by: ['status'],
+        where: scopedWhere,
         _count: { status: true },
       }),
       prisma.labTest.groupBy({
         by: ['testCatalogId'],
+        where: scopedWhere,
         _count: { testCatalogId: true },
       }),
       prisma.labTest.count({
         where: {
+          ...scopedWhere,
           createdAt: {
             gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
           },
@@ -642,6 +718,7 @@ export const getLabTestStats = async (req: AuthRequest, res: Response) => {
       }),
       prisma.labTest.groupBy({
         by: ['orderedBy'],
+        where: scopedWhere,
         _count: { orderedBy: true },
       }),
     ]);
@@ -683,10 +760,10 @@ export const getLabTestStats = async (req: AuthRequest, res: Response) => {
 // Get pending lab tests for lab technicians
 export const getPendingLabTests = async (req: AuthRequest, res: Response) => {
   try {
+    const pendingWhere = await applyLabListScope(prisma, req, { status: 'PENDING' });
     const pendingLabTests = await prisma.labTest.findMany({
-      where: {
-        status: 'PENDING',
-      },
+      where: pendingWhere,
+      take: 200,
       orderBy: { createdAt: 'asc' },
       include: {
         patient: {
@@ -734,15 +811,27 @@ export const getPendingLabTests = async (req: AuthRequest, res: Response) => {
 // Get all test catalog items
 export const getTestCatalog = async (req: AuthRequest, res: Response) => {
   try {
-    const { isActive } = req.query;
+    const { isActive, orderable } = req.query;
     
     const where: any = {};
     if (isActive !== undefined) {
       where.isActive = isActive === 'true';
     }
 
+    if (String(orderable) === 'true') {
+      where.isActive = true;
+      const assignedIds = await prisma.technicianTestSelection.findMany({
+        select: { testCatalogId: true },
+        distinct: ['testCatalogId'],
+      });
+      if (assignedIds.length > 0) {
+        where.id = { in: assignedIds.map((row) => row.testCatalogId) };
+      }
+    }
+
     const testCatalog = await prisma.testCatalog.findMany({
       where,
+      take: 500,
       orderBy: { testName: 'asc' },
     });
 
@@ -762,6 +851,7 @@ export const getTestCatalog = async (req: AuthRequest, res: Response) => {
 // Create new test catalog item
 export const createTestCatalogItem = async (req: AuthRequest, res: Response) => {
   try {
+    await assertLabModuleEnabled(prisma);
     const validatedData = testCatalogCreateSchema.parse(req.body);
 
     // Check if test name already exists
@@ -904,12 +994,13 @@ export const getScheduledLabTests = async (req: AuthRequest, res: Response) => {
     endOfDay.setHours(23, 59, 59, 999);
 
     const scheduledTests = await prisma.labTest.findMany({
-      where: {
+      where: await applyLabListScope(prisma, req, {
         scheduledDate: {
           gte: startOfDay,
           lte: endOfDay,
         },
-      },
+      }),
+      take: 200,
       include: {
         patient: {
           select: {
@@ -1126,12 +1217,12 @@ export const getLabTestsByCategory = async (req: AuthRequest, res: Response) => 
     let tests;
     
     if (category) {
-      // Get tests for a specific test catalog item
+      // Get tests for a specific catalog category
       tests = await prisma.labTest.findMany({
-        where: {
+        where: await applyLabListScope(prisma, req, {
           testCatalog: {
-            testName: {
-              contains: category as string,
+            category: {
+              equals: category as string,
               mode: 'insensitive',
             },
           },
@@ -1139,7 +1230,8 @@ export const getLabTestsByCategory = async (req: AuthRequest, res: Response) => 
             gte: start,
             lte: end,
           },
-        },
+        }),
+        take: 500,
         include: {
           patient: {
             select: {
@@ -1172,12 +1264,13 @@ export const getLabTestsByCategory = async (req: AuthRequest, res: Response) => 
       });
     } else {
       tests = await prisma.labTest.findMany({
-        where: {
+        where: await applyLabListScope(prisma, req, {
           createdAt: {
             gte: start,
             lte: end,
           },
-        },
+        }),
+        take: 500,
         include: {
           patient: {
             select: {
@@ -1282,6 +1375,15 @@ export const getTechnicianSelectedTests = async (req: AuthRequest, res: Response
       });
     }
 
+    try {
+      assertOwnTechnicianId(req, technicianId.trim());
+    } catch (accessError: any) {
+      return res.status(accessError.statusCode || 403).json({
+        success: false,
+        message: accessError.message,
+      });
+    }
+
     const selections = await prisma.technicianTestSelection.findMany({
       where: {
         technicianId: technicianId.trim(),
@@ -1303,6 +1405,7 @@ export const getTechnicianSelectedTests = async (req: AuthRequest, res: Response
           },
         },
       },
+      // selectedDatapoints and customPrice are returned on each selection row
       orderBy: [
         { labType: 'asc' },
         { createdAt: 'asc' }, // Use createdAt as fallback for ordering
@@ -1403,7 +1506,16 @@ export const setTechnicianTestSelections = async (req: AuthRequest, res: Respons
       });
     }
 
-    const { technicianId, testCatalogIds, labType } = validationResult.data;
+    const { technicianId, testCatalogIds, labType, datapointsByTest, pricesByTest } = validationResult.data;
+
+    try {
+      assertOwnTechnicianId(req, technicianId);
+    } catch (accessError: any) {
+      return res.status(accessError.statusCode || 403).json({
+        success: false,
+        message: accessError.message,
+      });
+    }
 
     // Additional defensive checks (shouldn't be needed after validation, but safety first)
     if (!technicianId || typeof technicianId !== 'string' || technicianId.trim() === '') {
@@ -1457,13 +1569,12 @@ export const setTechnicianTestSelections = async (req: AuthRequest, res: Respons
 
     console.log(`Technician verified: ${technician.fullName} (${technician.id})`);
 
-    // If clearing all selections for this lab type, delete and return early
+    // If clearing selections, delete this lab type or every type when ALL is sent
     if (validTestIds.length === 0) {
       const deletedCount = await prisma.technicianTestSelection.deleteMany({
-        where: { 
-          technicianId,
-          labType: labType
-        },
+        where: isAllLabType(labType)
+          ? { technicianId }
+          : { technicianId, labType },
       });
 
       console.log(`Cleared ${deletedCount.count} selections for technician ${technicianId}, lab type ${labType}`);
@@ -1487,6 +1598,7 @@ export const setTechnicianTestSelections = async (req: AuthRequest, res: Respons
     }
 
     // Verify all test catalog items exist (only if we have tests to validate)
+    let validatedCatalogs: Array<{ id: string; category: string | null }> = [];
     if (validTestIds.length > 0) {
       try {
         const testCatalogs = await prisma.testCatalog.findMany({
@@ -1494,6 +1606,7 @@ export const setTechnicianTestSelections = async (req: AuthRequest, res: Respons
             id: { in: validTestIds },
             isActive: true,
           },
+          select: { id: true, category: true },
         });
 
         if (testCatalogs.length !== validTestIds.length) {
@@ -1505,6 +1618,7 @@ export const setTechnicianTestSelections = async (req: AuthRequest, res: Respons
             message: `One or more test catalog items not found or inactive. Missing IDs: ${missingIds.join(', ')}`,
           });
         }
+        validatedCatalogs = testCatalogs;
       } catch (validationError: any) {
         console.error('Error validating test catalogs:', validationError);
         return res.status(400).json({
@@ -1525,13 +1639,12 @@ export const setTechnicianTestSelections = async (req: AuthRequest, res: Respons
         // The unique constraint is on [technicianId, testCatalogId], so we need to
         // delete any existing records with those combinations before creating new ones
 
-        // Step 1: Delete all selections for this technician and lab type
-        // This clears everything for the specific lab type
+        // Step 1: Delete current selections for this technician and lab type
+        // ALL replaces every assignment so a full catalog save is persisted.
         const deleteByLabType = await tx.technicianTestSelection.deleteMany({
-          where: {
-            technicianId,
-            labType: labType,
-          },
+          where: isAllLabType(labType)
+            ? { technicianId }
+            : { technicianId, labType },
         });
         console.log(`[Transaction] Deleted ${deleteByLabType.count} selections for lab type ${labType}`);
 
@@ -1569,11 +1682,17 @@ export const setTechnicianTestSelections = async (req: AuthRequest, res: Respons
           const selections = [];
           for (const testCatalogId of validTestIds) {
             try {
+              const catalogItem = validatedCatalogs.find((item) => item.id === testCatalogId);
+              const resolvedLabType = isAllLabType(labType)
+                ? mapCategoryToLabType(catalogItem?.category)
+                : labType;
               const selection = await tx.technicianTestSelection.create({
                 data: {
                   technicianId,
                   testCatalogId,
-                  labType,
+                  labType: resolvedLabType,
+                  selectedDatapoints: datapointsByTest?.[testCatalogId] || undefined,
+                  customPrice: pricesByTest?.[testCatalogId] ?? undefined,
                 },
               });
               selections.push(selection);
@@ -1676,10 +1795,20 @@ export const getTechnicianAvailableTests = async (req: AuthRequest, res: Respons
   try {
     const { technicianId } = req.params;
 
+    try {
+      assertOwnTechnicianId(req, technicianId);
+    } catch (accessError: any) {
+      return res.status(accessError.statusCode || 403).json({
+        success: false,
+        message: accessError.message,
+      });
+    }
+
     const selections = await prisma.technicianTestSelection.findMany({
       where: {
         technicianId,
         isActive: true,
+        testCatalog: { isActive: true },
       },
       include: {
         testCatalog: true,
@@ -1753,6 +1882,20 @@ export const uploadLabTestReport = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (!(await canAccessLabTestRecord(prisma, req, existingLabTest))) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only upload reports for tests assigned to you',
+      });
+    }
+
+    if (existingLabTest.status === 'COMPLETED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Completed lab tests cannot be modified',
+      });
+    }
+
     // Verify test category requires report upload (MRI, CT Scan, X-Ray)
     const testCategory = existingLabTest.testCatalog?.category;
     const requiresReport = testCategory === 'MRI' || testCategory === 'CT Scan' || testCategory === 'X-Ray';
@@ -1820,6 +1963,58 @@ export const uploadLabTestReport = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Error uploading report file',
+    });
+  }
+};
+
+export const downloadLabTestReport = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const labTest = await prisma.labTest.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        orderedBy: true,
+        testCatalogId: true,
+        reportFile: true,
+        testNameSnapshot: true,
+      },
+    });
+
+    if (!labTest) {
+      return res.status(404).json({ success: false, message: 'Lab test not found' });
+    }
+
+    if (!(await canAccessLabTestRecord(prisma, req, labTest))) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have access to this report',
+      });
+    }
+
+    if (!labTest.reportFile) {
+      return res.status(404).json({ success: false, message: 'No report file attached' });
+    }
+
+    const absolutePath = path.isAbsolute(labTest.reportFile)
+      ? labTest.reportFile
+      : path.join(process.cwd(), labTest.reportFile);
+
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({ success: false, message: 'Report file is missing' });
+    }
+
+    const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+    if (!path.resolve(absolutePath).startsWith(uploadsRoot)) {
+      return res.status(400).json({ success: false, message: 'Invalid report path' });
+    }
+
+    return res.download(absolutePath, path.basename(absolutePath));
+  } catch (error) {
+    console.error('Download lab test report error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error downloading report file',
     });
   }
 };
