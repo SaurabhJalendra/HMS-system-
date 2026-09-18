@@ -69,15 +69,11 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialActio
         page,
         limit: 20,
       });
-      if (response.appointments) {
-        setAppointments(response.appointments || []);
-        const nextTotalPages = Math.max(1, response.pagination?.totalPages || 1);
-        setTotalPages(nextTotalPages);
-        if (page > nextTotalPages) {
-          setCurrentPage(nextTotalPages);
-        }
-      } else {
-        setError('Failed to load appointments');
+      setAppointments(response?.appointments || []);
+      const nextTotalPages = Math.max(1, response?.pagination?.totalPages || 1);
+      setTotalPages(nextTotalPages);
+      if (page > nextTotalPages) {
+        setCurrentPage(nextTotalPages);
       }
     } catch (err) {
       console.error('Load appointments error:', err);
@@ -118,12 +114,8 @@ const AppointmentManagement = ({ user, isAuthenticated, onNavigate, initialActio
         page: 1,
         limit: 20,
       });
-      if (response.appointments) {
-        setAppointments(response.appointments || []);
-        setTotalPages(Math.max(1, response.pagination?.totalPages || 1));
-      } else {
-        setError('Search failed');
-      }
+      setAppointments(response?.appointments || []);
+      setTotalPages(Math.max(1, response?.pagination?.totalPages || 1));
     } catch (err) {
       console.error('Search error:', err);
       setError('Search error: ' + (err.response?.data?.message || err.message));

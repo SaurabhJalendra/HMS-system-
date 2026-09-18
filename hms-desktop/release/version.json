@@ -1,10 +1,10 @@
 {
-  "version": "1.0.24",
-  "backendVersion": "1.0.24",
+  "version": "1.0.25",
+  "backendVersion": "1.0.25",
   "minimumDesktopVersion": "1.0.0",
-  "latestDesktopVersion": "1.0.24",
+  "latestDesktopVersion": "1.0.25",
   "releaseNotes": [
-    "Bill full Rx course, cash P&L, and clinic-local salary dates"
+    "Fix appointments All Statuses load and P&L Decimal compile"
   ],
-  "publishedAt": "2026-09-18T12:07:37.444Z"
+  "publishedAt": "2026-09-18T14:53:56.820Z"
 }
