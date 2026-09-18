@@ -23,13 +23,16 @@ const appointmentUpdateSchema = z.object({
   status: z.nativeEnum(AppointmentStatus).optional(),
 });
 
-const appointmentSearchSchema = z.object({
-  patientId: z.string().optional(),
-  doctorId: z.string().optional(),
-  date: z.string().optional(),
-  status: z.nativeEnum(AppointmentStatus).optional(),
-  page: z.string().transform(val => parseInt(val) || 1).optional(),
-  limit: z.string().transform(val => parseInt(val) || 20).optional(),
+const blankToUndefined = (value: unknown) =>
+  value === '' || value === null ? undefined : value;
+
+export const appointmentSearchSchema = z.object({
+  patientId: z.preprocess(blankToUndefined, z.string().min(1).optional()),
+  doctorId: z.preprocess(blankToUndefined, z.string().min(1).optional()),
+  date: z.preprocess(blankToUndefined, z.string().optional()),
+  status: z.preprocess(blankToUndefined, z.nativeEnum(AppointmentStatus).optional()),
+  page: z.coerce.number().min(1).optional().default(1),
+  limit: z.coerce.number().min(1).max(200).optional().default(20),
 });
 
 // Create new appointment

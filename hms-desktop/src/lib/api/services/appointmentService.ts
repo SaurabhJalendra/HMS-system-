@@ -31,11 +31,23 @@ class AppointmentService {
     page?: number;
     limit?: number;
   }): Promise<{ appointments: Appointment[]; pagination: any }> {
+    const query: Record<string, string | number> = {};
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return;
+      query[key] = value;
+    });
+
     const response = await apiClient.get<ApiResponse<{ appointments: Appointment[]; pagination: any }>>(
       '/appointments',
-      { params }
+      { params: query }
     );
-    return response.data.data;
+    if (!response.data?.success || !response.data.data) {
+      throw new Error(response.data?.message || 'Failed to load appointments');
+    }
+    return {
+      appointments: response.data.data.appointments || [],
+      pagination: response.data.data.pagination,
+    };
   }
 
   // Get appointment by ID
